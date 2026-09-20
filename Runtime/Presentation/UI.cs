@@ -51,9 +51,14 @@ namespace CloverEngine
 
             var scaler = _root.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            // ★ E-ui-01：参考分辨率与匹配权重改为**可配置**（`CloverPresentation.ReferenceResolution` /
+            //   `.MatchWidthOrHeight`），默认值 = 本文件原先写死的 1920×1080 / 0.5
+            //   ⇒ 不配置时行为与旧版逐字一致（横版项目零影响）；竖版项目在 Game.Launch **之前**
+            //   设成 1080×1920 / match=0（见 `修复记录.md` E-ui-01）。
+            //   ⛔ 这里只读一次，Launch 之后改这两个属性不生效（画布已建好）。
+            scaler.referenceResolution = CloverPresentation.ReferenceResolution;
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-            scaler.matchWidthOrHeight = 0.5f;
+            scaler.matchWidthOrHeight = CloverPresentation.MatchWidthOrHeight;
 
             _root.AddComponent<GraphicRaycaster>();
 
@@ -87,6 +92,13 @@ namespace CloverEngine
             _loading = new LoadingLayer(_layers[(int)UILayer.System]);
             _confirm = new ConfirmLayer(_layers[(int)UILayer.Top]);
             _guide = new GuideLayer((RectTransform)_layers[(int)UILayer.System]);
+
+            // ★ E-ui-01：把**实际生效**的画布适配参数打出来（判据用，一次）。
+            //   竖版项目应看到「参考分辨率=1080×1920 / match=0 / Screen=<宽>×<高>（高 > 宽）」；
+            //   若这里仍是 1920×1080，说明业务侧那两行写在了 Game.Launch **之后**（改晚了，不生效）。
+            Game.Logger?.Info("UI",
+                $"画布适配：参考分辨率={CloverPresentation.ReferenceResolution.x}×{CloverPresentation.ReferenceResolution.y} " +
+                $"/ match={CloverPresentation.MatchWidthOrHeight} / Screen={Screen.width}×{Screen.height}");
         }
 
         /// <inheritdoc/>

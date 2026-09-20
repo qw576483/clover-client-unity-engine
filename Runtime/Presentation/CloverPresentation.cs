@@ -69,6 +69,38 @@ namespace CloverEngine
         public static Func<string, GameObject> PanelProvider { get; set; }
 
         /// <summary>
+        /// 常驻 Canvas 的**参考分辨率**（默认 <c>1920×1080</c> = 横版）。
+        ///
+        /// <para>
+        /// <b>⛔ 必须在 <see cref="Game.Launch"/> 之前设置</b>：<c>UIManager</c> 在**构造时读一次**
+        /// （构造发生在 Launch 的挂载钩子里，见 <see cref="Init"/> ⇒ <c>Game.AttachUI(new UIManager())</c>），
+        /// 之后再改**不生效**（画布已经建好）。竖版项目设成 <c>1080×1920</c>。
+        /// </para>
+        ///
+        /// <para>
+        /// <b>默认值 = 引擎原先把死的值</b>（连同 <see cref="MatchWidthOrHeight"/> = 0.5），
+        /// 因此不设置它时行为与旧版**逐字一致**，既有横版项目不受影响（见 `修复记录.md` E-ui-01）。
+        /// </para>
+        /// </summary>
+        public static Vector2 ReferenceResolution { get; set; } = new Vector2(1920f, 1080f);
+
+        /// <summary>
+        /// 常驻 Canvas 的 **CanvasScaler 宽高匹配权重**（<c>0</c> = 匹配宽度、<c>1</c> = 匹配高度、
+        /// <c>0.5</c> = 折中；默认 <c>0.5</c>，与引擎旧版一致）。
+        ///
+        /// <para>
+        /// 竖版项目建议取 <c>0</c>（匹配宽度）：画布宽恒等于 <see cref="ReferenceResolution"/>.x，
+        /// UI 在不同竖屏分辨率下都按**整数倍**缩放、像素对齐；取 <c>0.5</c> 时竖屏会按宽高比插值出
+        /// 小数倍缩放（例如 1080×2340 屏上 ≈1.10xx），文字与 1px 描边会被拉糊。
+        /// </para>
+        ///
+        /// <para>
+        /// <b>⛔ 同样必须在 <see cref="Game.Launch"/> 之前设置</b>，理由见 <see cref="ReferenceResolution"/>。
+        /// </para>
+        /// </summary>
+        public static float MatchWidthOrHeight { get; set; } = 0.5f;
+
+        /// <summary>
         /// 注册自动挂载钩子。SubsystemRegistration 阶段执行，早于首个场景的 Start，
         /// 因此一定早于业务调用 Game.Launch。
         /// </summary>

@@ -40,6 +40,7 @@ com.clover.unity-engine/
 │   └── Plugins/      原生插件落点（已入库 x86_64/msquic.dll 与 Android arm64-v8a / armeabi-v7a / x86_64 的 libmsquic.so；iOS 待补，QUIC 等原生件落这里）
 ├── Editor/           Editor 横切：Debugger（面板 / GM 控制台 / 网络模拟）
 │                               MapBake（地图烘焙：Unity 关卡 → CloverMap 二进制）
+│                               EditorStartScene（打开编辑器时打开启动场景）
 ├── Tests/            Editor（EditMode）+ PlayMode 测试
 ├── Samples~/         UPM 示例（LoginFlow）
 ├── Tools~/           工具与说明（`~` 结尾，Unity 不编译）
@@ -70,7 +71,7 @@ com.clover.unity-engine/
 │              │  Camera      │              │                        │
 │              │  Quality     │              │                        │
 ├──────────────┴──────────────┴──────────────┴────────────────────────┤
-│  Editor 横切：Debugger（面板/GM/网络模拟/统计）                        │
+│  Editor 横切：Debugger / MapBake / EditorStartScene（启动场景）     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -368,9 +369,23 @@ LogThrottle / LogBuffer  // 静态类，直接 CloverEngine.LogThrottle.X / Clov
 **参数是业务的**：烘焙规则（什么算障碍 / 地面高度 / 出生点标记前缀）由项目在面板上给，
 引擎只提供链路与中性默认值 —— 引擎里不写任何一款游戏的场景路径或关卡布局。
 
-### 5.3 配表代码生成（打表工具，不在引擎内）
+### 5.3 EditorStartScene（打开编辑器时打开启动场景）
 
-客户端引擎的编辑器程序集只有 **Debugger 与 MapBake** 两个横切。配表代码生成由仓库的**打表工具**（[`clover-tools/table`](https://github.com/qw576483/clover-tools/blob/main/table/README.md)）负责：
+`Clover/编辑器启动场景/` —— 打开编辑器（每次会话首次）把**启动场景**打开，保证点 Play 走完整启动链路。
+
+| 项 | 内容 |
+|---|---|
+| 启动场景怎么定 | `EditorBuildSettings.scenes` 里**第一条 enabled** 的场景（各工程本来就声明了：cs16 / super-mario / diablo2 = `Assets/Scenes/Boot.unity`，cr = `Assets/Scenes/Main.unity`）。引擎**不写死任何场景路径**，工程侧零配置 |
+| 菜单 | `Clover/编辑器启动场景/启用（打开编辑器时自动切到启动场景）`（勾选项，存 EditorPrefs、**按工程路径隔离**，默认开）；`Clover/编辑器启动场景/立即打开启动场景` |
+| 实现 | `Editor/EditorStartScene.cs`（`[InitializeOnLoadMethod]` + `delayCall`；`SessionState` 保证**每次编辑器会话只切一次**，域重载不会把人拽回启动场景） |
+
+**为什么必须这样**：编辑器按 Play 用的是**当前打开的场景**，不是 Build Settings 首项。开在关卡场景上点 Play 会整条跳过启动链路（`Game.Launch` / 流程装配都在启动场景里），现象是「点 Play 直接进关卡、缺初始化」**且不报错**。
+
+**三条不打扰原则**（任一命中就只记日志、不动场景）：① 批处理（CI / `-executeMethod`）下不切；② 已经打开着启动场景（含多场景叠加）不切；③ 当前场景**有未保存改动**不切 —— `OpenScene` 会弹原生模态保存框，Editor 脚本里禁止弹模态。首次导入 / 编译未结束时最多等约 10 秒再试，超了本次会话放弃。
+
+### 5.4 配表代码生成（打表工具，不在引擎内）
+
+客户端引擎的编辑器程序集只有 **Debugger、MapBake 与 EditorStartScene** 三个横切。配表代码生成由仓库的**打表工具**（[`clover-tools/table`](https://github.com/qw576483/clover-tools/blob/main/table/README.md)）负责：
 源表 → tsv + 强类型 C# 代码；生成物禁止手改。
 
 明确**不做代码生成**的部分：`EMsg` 消息号、`Protocol` DTO、动画参数常量、多语言 key ——

@@ -11,7 +11,7 @@ namespace CloverEngine
     /// 同一份契约的三处实现，改动必须同步（缺一处的失败是**静默**的：文件能读、游戏能起、只是地图不对）：
     ///   写：`MapWriter.cs`（<see cref="CloverMapWriter"/>，Editor 烘焙导出）
     ///   读：本文件（客户端：本地碰撞查询）
-    ///   读：`clover-server-engine/pkg/domain/mmo/mapdata/`（服务端：权威碰撞 / 寻路 / 出生点）
+    ///   读：[`clover-server-engine/pkg/domain/mmo/mapdata/`](https://github.com/qw576483/clover-server-engine/blob/main/pkg/domain/mmo/mapdata/.md)（服务端：权威碰撞 / 寻路 / 出生点）
     ///
     /// ★ 本文件**不引用引擎其它部分**（只用 System.IO 与几个 Unity 值类型），因此可以被
     /// 直接链进一个裸 .NET 控制台程序做跨端字节校验 —— 源文件直链，不存在副本漂移。

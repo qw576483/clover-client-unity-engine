@@ -10,7 +10,7 @@
 ## 跑法
 
 ```bash
-cd clover-client-unity-engine/Tools~/core-assert
+cd Tools~/core-assert
 
 dotnet run                                  # 常驻平台：落盘 / 原子写 / 往返 / 损坏留档
 dotnet run -p:DefineConstants=UNITY_WEBGL    # WebGL：无文件系统 ⇒ 降级为内存存储、不创建目录

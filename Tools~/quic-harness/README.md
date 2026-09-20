@@ -21,7 +21,7 @@
 ## 怎么跑
 
 ```bash
-cd clover-client-unity-engine/Tools~/quic-harness
+cd Tools~/quic-harness
 dotnet build                     # 11 秒
 bin/Debug/net8.0/quic-harness.exe        # 全部步骤（含压力步骤）
 bin/Debug/net8.0/quic-harness.exe login  # 只跑"连接 → 请求/回包 → 断开"

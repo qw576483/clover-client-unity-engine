@@ -175,7 +175,7 @@ CloverEngine.Presentation  → [Core]
 | **不含本地预测解算** | "输入 → 位移 → 贴墙滑动"不在引擎（§3.1「引擎不做本地预测」）：引擎只给空间事实，怎么用是业务手感 |
 | 未加载时的行为 | `WalkableAt` 恒返回 true（不阻挡）：地图缺失是导出/配置问题，不该表现成"玩家被锁死" |
 
-> 格式契约（逐字节）见 `clover-server-engine/pkg/domain/mmo/mapdata/README.md`；
+> 格式契约（逐字节）见 [`clover-server-engine/pkg/domain/mmo/mapdata/README.md`](https://github.com/qw576483/clover-server-engine/blob/main/pkg/domain/mmo/mapdata/README.md)；
 > 导出端是 `Editor/MapBake`。三处实现（写 / 客户端读 / 服务端读）必须同步改。
 
 #### Scene（场景管理）
@@ -280,7 +280,7 @@ CloverEngine.Presentation  → [Core]
 
 | 模块 | 能力 | 约束 |
 |---|---|---|
-| DataTable | 策划 TSV → 由**打表工具**生成的强类型 C# 表（生成器在 `clover-tools/table`，不在客户端引擎内），启动加载、按 ID 查询 | 生成物禁止手改；不用反射，IL2CPP 安全 |
+| DataTable | 策划 TSV → 由**打表工具**生成的强类型 C# 表（生成器在 [`clover-tools/table`](https://github.com/qw576483/clover-tools/blob/main/table.md)，不在客户端引擎内），启动加载、按 ID 查询 | 生成物禁止手改；不用反射，IL2CPP 安全 |
 | Setting | 本地存档：单文件 JSON（**无设备级 / 账号级分级、无加密**）。写盘**原子替换**：先写 `settings.json.tmp` → `File.Replace`（`Setting.cs:248-258`），写一半失败只会留下 `.tmp`、不破坏既有文件；`Set` 拒绝不可 JSON 序列化的值（否则一个坏值进字典后整份配置再也落不了盘）；Load 遇损坏 json 先另存 `.corrupt` 留档、再回退默认并标脏（下次 Save 覆盖）；**目录为 null / 空串 / 非法时不再抛异常**（旧实现 `Directory.CreateDirectory("")` 会把 `Game.Launch` 打崩），退化为内存存储并 Warn（`:121-144`）；**WebGL 不建目录、不读、不写**，设置只在内存、进程结束即丢（`:111-119`）。**实现落在 `Runtime/Core/Setting.cs`** —— 能力上属数据域，但契约与门面在 `Core`，故**程序集归属 `Core`** | 替代裸 PlayerPrefs |
 | Localization | 多语言文本，语言切换事件 | 文案 key 与配表同套生成（**图片多语言未实现**，需要时再加接口） |
 | CloverTable | **读自家打表工具的产物**（E-core-11）：`LoadAll(streamingAssetsDir, dataDir)`（成功 `null` / 失败**可定位错误串**）+ `Get<T>(tableName, int\|string key)`（反射填 public 字段、按 (表,类型,列) 缓存）+ `Dir` / `ResolveDir` / `RequiredTables` | ⚠️ 引擎旧入口 `CloverData.InitDataTable` 要求行类实现 `IDataRow`、**读不了打表产物** ⇒ 工程侧一律用 `CloverTable`；打表生成的 `Tables.Default.*` 强类型壳是"便捷访问层"，可继续用 |
@@ -370,7 +370,7 @@ LogThrottle / LogBuffer  // 静态类，直接 CloverEngine.LogThrottle.X / Clov
 
 ### 5.3 配表代码生成（打表工具，不在引擎内）
 
-客户端引擎的编辑器程序集只有 **Debugger 与 MapBake** 两个横切。配表代码生成由仓库的**打表工具**（`clover-tools/table`）负责：
+客户端引擎的编辑器程序集只有 **Debugger 与 MapBake** 两个横切。配表代码生成由仓库的**打表工具**（[`clover-tools/table`](https://github.com/qw576483/clover-tools/blob/main/table.md)）负责：
 源表 → tsv + 强类型 C# 代码；生成物禁止手改。
 
 明确**不做代码生成**的部分：`EMsg` 消息号、`Protocol` DTO、动画参数常量、多语言 key ——

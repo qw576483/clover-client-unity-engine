@@ -5,7 +5,7 @@
 
 ## 为什么需要插件
 
-服务端 QUIC 已就绪（`clover-server-engine/internal/transport/net/quic`，ALPN `clover-quic`，
+服务端 QUIC 已就绪（[`clover-server-engine/internal/transport/net/quic`](https://github.com/qw576483/clover-server-engine/blob/main/internal/transport/net/quic.md)，ALPN `clover-quic`，
 流上 `[4B 大端 len][客户端帧]`，不可靠走 Datagram）。客户端缺的只是**原生 QUIC 栈**：
 Unity 的 .NET Standard 2.1 档案没有 `System.Net.Quic`（实测 Unity 6000.6 的
 `NetStandard/ref/2.1.0`、`Managed`、`MonoBleedingEdge` 三处均无该程序集）。
@@ -60,9 +60,9 @@ dotnet add $env:TEMP\msquic-fetch\msquic-fetch.csproj package Microsoft.Native.Q
 
 ```bash
 # 必须经 Git-Bash 跑（原因见「为什么这么绕」第 1 条）
-clover-client-unity-engine/Tools~/native/build-android-quic.cmd                 # 默认 arm64-v8a
-clover-client-unity-engine/Tools~/native/build-android-quic.cmd armeabi-v7a
-clover-client-unity-engine/Tools~/native/build-android-quic.cmd x86_64          # x86_64 模拟器
+Tools~/native/build-android-quic.cmd                 # 默认 arm64-v8a
+Tools~/native/build-android-quic.cmd armeabi-v7a
+Tools~/native/build-android-quic.cmd x86_64          # x86_64 模拟器
 CLEAN=1 .../build-android-quic.cmd                                             # 清理后全量重编
 ```
 

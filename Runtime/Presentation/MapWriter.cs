@@ -18,7 +18,7 @@ namespace CloverEngine
     /// 同一份契约的三处实现，改动必须同步（缺一处的失败是**静默**的：文件能写、能读、只是地图不对）：
     ///   写：本文件（Editor 烘焙导出）
     ///   读：`MapFormat.cs` 的 <see cref="CloverMapFormat"/>（客户端本地碰撞；本文件的自检也用它）
-    ///   读：`clover-server-engine/pkg/domain/mmo/mapdata/`（服务端权威逻辑地图）
+    ///   读：[`clover-server-engine/pkg/domain/mmo/mapdata/`](https://github.com/qw576483/clover-server-engine/blob/main/pkg/domain/mmo/mapdata/.md)（服务端权威逻辑地图）
     ///
     /// 为什么导出二进制而不是 JSON：位图按格增长，真实地图动辄百万格 —— JSON 要么逐格写布尔（体积爆炸），
     /// 要么 base64（膨胀 33% 且服务端要多解码一趟）。二进制版位图就是原始字节，服务端**零拷贝**直接引用。

@@ -1,10 +1,10 @@
-# clover-client-unity-engine
+# Clover Unity Client Engine
 
 Clover 的 **Unity C# 客户端引擎**，以 UPM 包形式分发（包名 `com.clover.unity-engine`）。
 
-对标服务端 [clover-server-engine](https://github.com/qw576483/clover-server-engine)：两端只在**两处**对齐 ——
+与服务端 [clover-server-engine](https://github.com/qw576483/clover-server-engine) 配套：两端只在**两处**对齐 ——
 ① API 语义（`OnMsg` / `On` / `Timer.After|Every` / `Fsm.Trigger` 的拼写与语义）；
-② 网络协议（帧格式、EMsg 消息号、ObjectID 位布局逐字节一致）。**除此之外不镜像服务端目录结构**，客户端按自己的能力域组织。
+② 网络协议（帧格式、EMsg 消息号、ObjectID 位布局逐字节一致）。除此之外客户端按自己的能力域组织，不镜像服务端目录。
 
 ## 环境要求
 
@@ -15,61 +15,64 @@ Clover 的 **Unity C# 客户端引擎**，以 UPM 包形式分发（包名 `com.
 
 ## 安装
 
-**UPM（推荐）**：Package Manager → `+` → *Add package from git URL*，填：
+**UPM（推荐）**：Unity → Window → Package Manager → `+` → *Add package from git URL*，填：
 
 ```
 https://github.com/qw576483/clover-client-unity-engine.git
 ```
 
-**本地**：*Add package from disk*，选择本目录下的 `package.json`。
+**本地**：`+` → *Add package from disk*，选择本目录下的 `package.json`。
 
-## 目录结构
+## 快速开始
 
-```text
-clover-client-unity-engine/
-├── Runtime/
-│   ├── Core/         基础域：Game / Event / Timer / Fsm / Dispatcher / Logger / LogThrottle
-│   │                 / LogBuffer / Setting / Json / DeviceId，以及全部跨模块契约（含协议载体类型）
-│   ├── Data/         数据域：CloverData / DataTable / Localization / CloverTable（读打表产物）/ FileSlotStore
-│   ├── Network/      网络域：Network / WebRequest / WorldSync / CloverAuth / SchemaRegistry
-│   │                 / Lan（局域网寻服：UDP 旁路发现）
-│   ├── Resource/     资源域：后端抽象 / Resources / AssetBundle / 清单热更与下载器
-│   ├── Presentation/ 表现域：Scene / Entity / ObjectPool / Map（逻辑地图）/ UI / UIWidgets
-│   │                 / TextHooks / SpriteAtlas / Animation / Sound / Input / Camera / Quality
-│   └── Plugins/      原生插件落点（已入库 msquic：x86_64/msquic.dll 与 Android arm64-v8a / armeabi-v7a / x86_64）
-├── Editor/           Editor 横切：Debugger（面板 / GM 控制台 / 网络模拟）、MapBake（Unity 关卡 → CloverMap 二进制）
-├── Tests/            EditMode + PlayMode 测试
-├── Samples~/         UPM 示例（LoginFlow）
-├── Tools~/           工具与说明（`~` 结尾，Unity 不编译）：core-assert、quic-harness、native
-└── package.json
+```csharp
+using CloverEngine.Core;
+
+var config = new GameConfig
+{
+    ServerAddr = "127.0.0.1:8002",   // 网关 TCP 口（服务端 gateway.listen_tcp）
+    MaxReconnectCount = 5,
+    UseTls = true,                   // 与服务端 gateway.tcp_tls_disabled 相反（默认 false 时这里 true）
+};
+
+Game.Launch(config);                 // 启动引擎（自动挂载表现域各模块）
+
+// 第 1 参 = 网关 TCP 口；第 2 参 = 网关 UDP 口（gateway.listen_udp），留空 = 不启用不可靠通道
+CloverNet.Init("127.0.0.1:8002", "127.0.0.1:8003");
 ```
 
-> 以 `~` 结尾的目录（`Samples~` / `Tools~`）Unity 完全不扫描，**不能**放运行时代码。
+完整链路（注册 → 登录 → 会话建立 → 全量同步 → 断线恢复）见包内示例 `Samples~/LoginFlow`。
 
-## 依赖规则（asmdef 编译期强制）
+## 能力域
 
-```text
-CloverEngine.Core          → []            （基础域，不依赖任何人）
-CloverEngine.Data          → [Core]
-CloverEngine.Network       → [Core]
-CloverEngine.Resource      → [Core]
-CloverEngine.Presentation  → [Core]
-```
+| 域 | 内容 |
+|---|---|
+| `Runtime/Core` | Game 门面 / Event / Timer / Fsm / Dispatcher / Logger / Setting / Json，以及全部跨模块契约 |
+| `Runtime/Data` | CloverData / DataTable / Localization / CloverTable（读打表产物）/ FileSlotStore |
+| `Runtime/Network` | Network / WorldSync / WebRequest / CloverAuth / SchemaRegistry / Lan（局域网寻服） |
+| `Runtime/Resource` | 后端抽象 / Resources / AssetBundle / 清单热更与下载器 |
+| `Runtime/Presentation` | Scene / Entity / ObjectPool / Map / UI / UIWidgets / SpriteAtlas / Animation / Sound / Input / Camera / Quality |
+| `Editor` | Debugger（面板 / GM 控制台 / 网络模拟）、MapBake（Unity 关卡 → CloverMap 二进制） |
 
-各模块程序集**只引用 `Core`，模块之间互不引用**；`Game` 门面在 `Core`，负责聚合。
-
-## 示例
-
-`Samples~/LoginFlow`：注册 → 登录 → 会话建立 → 全量同步 → 断线恢复的完整接入流程。
+各模块程序集**只引用 `Core`**（`CloverEngine.Data` / `.Network` / `.Resource` / `.Presentation` → `[Core]`），模块之间互不引用；`Game` 门面在 `Core`，负责聚合。
 
 ## 文档
 
 | 文件 | 内容 |
 |---|---|
-| [`结构规则.md`](结构规则.md) | **结构铁律**：目录归属、依赖方向、命名、契约、评审口令，以及网络与会话契约（N1–N13）、通用硬约束（G1–G13）——**最该先读** |
-| [`clover-client-unity-engine-index.md`](clover-client-unity-engine-index.md) | 索引：有什么、在哪、怎么读（能力域、模块总览、包结构） |
-| [`修复记录.md`](修复记录.md) | E 编号体系的缺陷修复记录（与服务端的 S 编号是两套独立体系） |
+| [`结构规则.md`](结构规则.md) | 结构铁律：目录归属、依赖方向、命名、契约，以及网络与会话契约（N1–N13）、通用硬约束（G1–G13） |
+| [`clover-client-unity-engine-index.md`](clover-client-unity-engine-index.md) | 索引：包结构、能力域、模块总览 |
+| [`修复记录.md`](修复记录.md) | E 编号体系的缺陷修复记录 |
+| [clover-doc](https://github.com/qw576483/clover-doc) | 在线文档（`client/` 一节） |
 
-## 原生库
+## 相关仓库
 
-`Runtime/Plugins/` 下的 msquic 二进制已入库；重新构建原生库（msquic / quictls）见 `Tools~/native/README.md`，构建中间产物不入库。
+| 仓库 | 说明 |
+|---|---|
+| [clover-server-engine](https://github.com/qw576483/clover-server-engine) | Go 服务端引擎 |
+| [clover-doc](https://github.com/qw576483/clover-doc) | 框架文档 |
+| [clover-tools](https://github.com/qw576483/clover-tools) | 打表工具（生成客户端强类型表代码） |
+
+## 许可证
+
+[MIT](LICENSE)

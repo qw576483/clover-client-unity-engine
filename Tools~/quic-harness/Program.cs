@@ -8,7 +8,7 @@ namespace CloverEngine
     /// QUIC 原生绑定的**逐步驱动试验台**。
     ///
     /// <para>
-    /// 用法：<c>dotnet run --project clover-client-unity-engine/Tools~/quic-harness</c>
+    /// 用法：<c>dotnet run --project Tools~/quic-harness</c>
     /// （需要本机网关已启用 QUIC：配了 <c>gateway.tls_cert</c>，监听 <c>127.0.0.1:8003</c>）
     /// </para>
     ///

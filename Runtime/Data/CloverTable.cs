@@ -2,11 +2,11 @@
 // CloverEngine · Runtime/Data/CloverTable.cs
 // 打表产物（tsv）加载器：读 clover 打表工具产出的 tsv + 按主键强类型取行 —— 通用横切能力，下沉到引擎。
 //
-// 为什么要有它（`clover-tools/ai-skill/patterns/table.md`「代码侧怎么读」）：
+// 为什么要有它（[`clover-tools/ai-skill/patterns/table.md`](https://github.com/qw576483/clover-tools/blob/main/ai-skill/patterns/table.md)「代码侧怎么读」）：
 //   打表工具的产物是「**tsv 数据** + **强类型行类**」，而引擎既有的数据域入口
 //   `CloverData.InitDataTable(dir)` / `IDataTable.Load<T>` 要求行类实现 `IDataRow`
 //   （`Runtime/Core/Contracts.cs`，`int Id { get; }`）——打表生成的行类是**普通字段容器**
-//   （`clover-tools/table/core/internal/gen/cs.go:259-267`），**不实现** `IDataRow`
+//   （[`clover-tools/table/core/internal/gen/cs.go:259-267`](https://github.com/qw576483/clover-tools/blob/main/table/core/internal/gen/cs.go:259-267)），**不实现** `IDataRow`
 //   ⇒ 两者不是同一条链路：每个业务项目只能自己再写一遍加载器
 //   （Diablo2 项目原先那份 = `client/Assets/Scripts/Table/TableLoader.cs`）。
 //   ⇒ 本类把「目录解析 + 逐 tsv 读取 + 按主键取行」下沉到引擎：业务侧只剩「一行加载 + 按表名取行」。
@@ -14,12 +14,12 @@
 // 与打表产物**必须逐条对齐**的约定（改动任一条都会让值与生成代码分叉）：
 //   · tsv：第 1 行是列名表头、第 2 行起是数据，`File.ReadAllLines` 读、`'\t'` 分隔，
 //     只跳过**空行**（`string.IsNullOrEmpty`），⛔ 不识别 `#` 注释；
-//     出处：`clover-tools/table/core/internal/gen/cs.go:277-285`（生成代码的 `Load`）。
+//     出处：[`clover-tools/table/core/internal/gen/cs.go:277-285`](https://github.com/qw576483/clover-tools/blob/main/table/core/internal/gen/cs.go:277-285)（生成代码的 `Load`）。
 //   · 主键 = **第 1 列**：int 主键取整数解析结果、string 主键取原样字符串；
 //     出处：`cs.go:311`（`index[row.<第一列>] = row`）+ `cs.go:137-142`（`csPkType`）。
 //   · 列名 → 行类字段名：按**非字母数字**拆分后每段首字母大写再拼接
 //     （`hp_min` → `HpMin`、`is_act1_start` → `IsAct1Start`、`dmg2_min` → `Dmg2Min`）；
-//     出处：`clover-tools/table/core/internal/gen/ident.go:15 ToGoIdent`（`splitIdent` + 首字母大写）。
+//     出处：[`clover-tools/table/core/internal/gen/ident.go:15 ToGoIdent`](https://github.com/qw576483/clover-tools/blob/main/table/core/internal/gen/ident.go:15 ToGoIdent)（`splitIdent` + 首字母大写）。
 //   · 单元格 → 字段值：**空值 / 非法值取类型默认值、不报错**（与生成代码同语义；
 //     这里报错反而会与产物行为分叉）；出处：`cs.go:159-246`（`TableParsers.*`）。
 //   · 重复主键：**后者覆盖前者**（生成代码就是字典赋值）；出处：`cs.go:311`。
@@ -522,7 +522,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 列名 → 行类字段名（`hp_min` → `HpMin`）：按**非字母数字**拆段、每段首字母大写再拼接。
-        /// 出处：`clover-tools/table/core/internal/gen/ident.go:15 ToGoIdent`。
+        /// 出处：[`clover-tools/table/core/internal/gen/ident.go:15 ToGoIdent`](https://github.com/qw576483/clover-tools/blob/main/table/core/internal/gen/ident.go:15 ToGoIdent)。
         /// </summary>
         private static string ToIdent(string column)
         {

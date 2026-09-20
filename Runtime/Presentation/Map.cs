@@ -9,7 +9,7 @@ namespace CloverEngine
     ///
     /// 数据来源必须与服务端**同一份字节**（导出器一次写两份）：
     /// 本地预测与服务端跑同一套空间事实，否则本地能穿墙、服务端拒绝 ⇒ 位置越差越大 ⇒ 橡皮带。
-    /// 格式契约（逐字节）见 `clover-server-engine/pkg/domain/mmo/mapdata/README.md`。
+    /// 格式契约（逐字节）见 [`clover-server-engine/pkg/domain/mmo/mapdata/README.md`](https://github.com/qw576483/clover-server-engine/blob/main/pkg/domain/mmo/mapdata/README.md)。
     ///
     /// ★ 本模块**只回答空间事实**（这一格能不能走）。「输入 → 位移 → 贴墙滑动」那套本地预测解算
     /// 不在引擎（见 `结构规则.md` §3.1）：业务拿 <see cref="WalkableAt"/> 自己写即可，

@@ -15,7 +15,13 @@ setlocal
 set ABI=%1
 if "%ABI%"=="" set ABI=arm64-v8a
 
-set BASH="C:\Program Files\Git\bin\bash.exe"
+rem Git-Bash 位置：默认标准安装路径；装在别处先 set BASH="<Git安装盘>\Git\bin\bash.exe" 覆盖
+if not defined BASH set BASH="C:\Program Files\Git\bin\bash.exe"
+if not exist %BASH% (
+  echo [ERR] 找不到 Git-Bash: %BASH%
+  echo       请安装 Git for Windows，或先执行: set BASH="<Git安装盘>\Git\bin\bash.exe"
+  exit /b 3
+)
 set SCRIPT=%~dp0build-android-quic.sh
 
 rem 交给 msys 的路径要用 /c/... 形式

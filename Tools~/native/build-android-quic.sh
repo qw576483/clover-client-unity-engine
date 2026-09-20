@@ -27,6 +27,8 @@
 #   ./build-android-quic.sh x86_64          # x86_64 模拟器
 # 环境变量（都可省）：
 #   ANDROID_NDK_ROOT  NDK 路径（默认取 Unity 自带 NDK）
+#   UNITY_EDITOR_ROOT Unity 编辑器目录（msys 形式；默认 /c/Program Files/Unity/Hub/Editor/6000.6.0f1/Editor，
+#                     编辑器换盘/换小版本时覆盖它即可找到自带 NDK）
 #   ANDROID_API       min API（默认 26，与工程 AndroidMinSdkVersion 一致）
 #   MSQUIC_TAG        版本标签（默认 v2.4.16，与 Windows 版 msquic.dll 的 FileVersion 一致）
 #   QUIC_BUILD_ROOT   源码/构建根目录（默认 <仓库根>/_native_build，不进库）
@@ -51,7 +53,10 @@ SRC_DIR="$BUILD_ROOT/msquic"
 OUT_DIR="$BUILD_ROOT/out/$ABI"
 DEST_DIR="$ENGINE_DIR/Runtime/Plugins/Android/libs/$ABI"
 
-NDK="${ANDROID_NDK_ROOT:-/c/Program Files/Unity/Hub/Editor/6000.6.0f1/Editor/Data/PlaybackEngines/AndroidPlayer/NDK}"
+# Unity 自带 NDK 的位置：默认按标准安装路径推；编辑器装在别的盘 / 换小版本时用 UNITY_EDITOR_ROOT 覆盖
+# （这里要 msys 正斜杠形式，例：/<盘符>/Unity/Hub/Editor/<版本>/Editor）
+UNITY_EDITOR_ROOT="${UNITY_EDITOR_ROOT:-/c/Program Files/Unity/Hub/Editor/6000.6.0f1/Editor}"
+NDK="${ANDROID_NDK_ROOT:-$UNITY_EDITOR_ROOT/Data/PlaybackEngines/AndroidPlayer/NDK}"
 [ -d "$NDK" ] || { echo "NDK 不存在: $NDK（可用 ANDROID_NDK_ROOT 指定）" >&2; exit 3; }
 
 # --- 关键：把三个目录塞进 PATH（缺一不可）------------------------------------

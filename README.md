@@ -26,7 +26,7 @@ https://github.com/qw576483/clover-client-unity-engine.git
 ## 快速开始
 
 ```csharp
-using CloverEngine.Core;
+using CloverEngine;
 
 var config = new GameConfig
 {

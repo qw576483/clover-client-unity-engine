@@ -197,6 +197,17 @@ namespace CloverEngine
         /// <summary>发送线程空转等待间隔（毫秒），兼作心跳检查周期</summary>
         private const int SendLoopWaitMs = 1000;
 
+        /// <summary>
+        /// 收发队列各自允许积压的最大帧数（背压上限）。
+        /// 无界队列在「主线程 Tick 长时间停顿」或「链路半死但仍在 Enqueue」时会持续吃内存，
+        /// 最终把进程撑爆。超过上限即丢弃**最旧**的帧并降频告警：保留最新的帧更接近当前状态，
+        /// 而被积压的旧帧在这种场景下基本已经过期（QUIC 侧已有同类发送背压）。
+        /// </summary>
+        private const int MaxQueuedFrames = 4096;
+
+        /// <summary>队列丢弃累计次数，用于把告警降频（只在第 1 次与每 64 次时打印）。</summary>
+        private int _queueDropCount;
+
         private TcpClient _client;
         private Stream _stream;
         private volatile bool _running;
@@ -220,6 +231,17 @@ namespace CloverEngine
 
         /// <summary>心跳间隔（毫秒）：N 毫秒无发送则发 ping，默认 15 秒，与服务端读超时探测匹配</summary>
         public int HeartbeatIntervalMs = 15_000;
+
+        /// <summary>
+        /// 接收超时（毫秒）：连续该时长**一个字节都没收到**即判链路失败。&lt;=0 时取
+        /// <see cref="EffectiveReceiveTimeoutMs"/> 的派生值（心跳间隔的 3 倍，下限 30 秒）。
+        ///
+        /// 为什么必须设：<see cref="RecvLoop"/> 是阻塞读，此前只在 TLS 握手期设过超时、
+        /// 握手后立刻复位为 0（= 永不超时）。半开连接（对端进程已崩、NAT 静默丢弃、
+        /// 网线拔出）下这个读线程会**永久阻塞**，既不报错也不退出，重连逻辑永远等不到失败信号。
+        /// 取 3 倍心跳是因为正常情况下每个心跳周期内都有 ping/pong 往返，3 倍是给抖动留的余量。
+        /// </summary>
+        public int ReceiveTimeoutMs;
 
         /// <summary>连接超时（毫秒），默认 5 秒</summary>
         public int ConnectTimeoutMs = 5_000;
@@ -315,6 +337,12 @@ namespace CloverEngine
                         _stream = ssl;
                     }
 
+                    // 半开连接防护（见 ReceiveTimeoutMs）：TLS 与非 TLS 两条路径都要设接收超时，
+                    // 否则 RecvLoop 会永久阻塞在阻塞读上（此前只有 TLS 握手期设过，握手后被复位成 0）。
+                    // 发送侧不设超时：SendLoop 自带节流，socket 写超时只会把正常的大帧写出打断。
+                    client.ReceiveTimeout = EffectiveReceiveTimeoutMs;
+                    client.SendTimeout = 0;
+
                     _linkDown = 0;
                     _running = true;
                     _lastSendTicks = Stopwatch.GetTimestamp();
@@ -386,7 +414,7 @@ namespace CloverEngine
 
             // 直接编码成整帧（一次分配）：旧实现先拷一份 payload、EncodeFrame 再拷一份整帧
             // （每帧两次分配两次拷贝）；现在"帧头 + 数据"一次布局完成。
-            _sendQueue.Enqueue(EncodeFrame(FrameTypeData, data, offset, count));
+            EnqueueBounded(_sendQueue, EncodeFrame(FrameTypeData, data, offset, count), "send");
             try
             {
                 _sendSignal.Release();
@@ -496,11 +524,11 @@ namespace CloverEngine
                     {
                         case FrameTypeData:
                             if (payload.Length > 0 && _generation == gen)
-                                _recvQueue.Enqueue(payload);
+                                EnqueueBounded(_recvQueue, payload, "recv");
                             break;
                         case FrameTypePing:
                             // 收到 ping 立即回 pong，保证服务端写探测通过
-                            _sendQueue.Enqueue(EncodeFrame(FrameTypePong, Array.Empty<byte>()));
+                            EnqueueBounded(_sendQueue, EncodeFrame(FrameTypePong, Array.Empty<byte>()), "send");
                             SignalSend();
                             break;
                         case FrameTypePong:
@@ -616,6 +644,31 @@ namespace CloverEngine
             }
         }
 
+        /// <summary>生效的接收超时（毫秒）：未显式配置时取心跳间隔的 3 倍，下限 30 秒。</summary>
+        private int EffectiveReceiveTimeoutMs =>
+            ReceiveTimeoutMs > 0 ? ReceiveTimeoutMs : Math.Max(HeartbeatIntervalMs * 3, 30_000);
+
+        /// <summary>
+        /// 入队并施加背压（见 <see cref="MaxQueuedFrames"/>）：超出上限时丢弃**最旧**的帧。
+        /// 丢弃必须留痕且降频，否则现场只表现为「莫名少收到消息」，无从判断是丢了还是没发。
+        /// </summary>
+        private void EnqueueBounded(ConcurrentQueue<byte[]> queue, byte[] frame, string what)
+        {
+            queue.Enqueue(frame);
+            var dropped = 0;
+            while (queue.Count > MaxQueuedFrames && queue.TryDequeue(out _))
+                dropped++;
+            if (dropped == 0)
+                return;
+            var total = Interlocked.Add(ref _queueDropCount, dropped);
+            if (total == dropped || total % 64 < dropped)
+            {
+                Game.Logger?.Warn("Network",
+                    $"tcp {what} queue exceeded {MaxQueuedFrames} frames, dropped {dropped} oldest (total={total}) — " +
+                    "链路积压：检查主线程 Tick 是否被阻塞或对端是否停止读取");
+            }
+        }
+
         private byte ReadByte()
         {
             var b = _stream.ReadByte();
@@ -660,6 +713,33 @@ namespace CloverEngine
         private Thread _recvThread;
         private volatile bool _running;
         private readonly ConcurrentQueue<byte[]> _recvQueue = new();
+
+        /// <summary>
+        /// UDP 收包队列上限（背压）。无界队列在「主线程长时间不 Tick」时会持续吃内存，
+        /// 而 UDP 无流控 —— 对端发多快就积多快。超过上限丢弃**最旧**的报文并降频告警。
+        /// </summary>
+        private const int MaxQueuedDatagrams = 4096;
+
+        /// <summary>UDP 队列丢弃累计次数，用于把告警降频。</summary>
+        private int _queueDropCount;
+
+        /// <summary>入队并按 <see cref="MaxQueuedDatagrams"/> 施加背压（丢最旧 + 降频告警）。</summary>
+        private void EnqueueRecvBounded(byte[] frame)
+        {
+            _recvQueue.Enqueue(frame);
+            var dropped = 0;
+            while (_recvQueue.Count > MaxQueuedDatagrams && _recvQueue.TryDequeue(out _))
+                dropped++;
+            if (dropped == 0)
+                return;
+            var total = Interlocked.Add(ref _queueDropCount, dropped);
+            if (total == dropped || total % 64 < dropped)
+            {
+                Game.Logger?.Warn("Network",
+                    $"udp recv queue exceeded {MaxQueuedDatagrams} datagrams, dropped {dropped} oldest (total={total}) — " +
+                    "主线程 Tick 可能被阻塞");
+            }
+        }
 
         /// <summary>线路类型</summary>
         public TransportKind Kind => TransportKind.RawUdp;
@@ -832,7 +912,7 @@ namespace CloverEngine
 
                     var frame = new byte[datagram.Length - 1];
                     Buffer.BlockCopy(datagram, 1, frame, 0, frame.Length);
-                    _recvQueue.Enqueue(frame);
+                    EnqueueRecvBounded(frame);
                 }
                 catch (Exception e)
                 {

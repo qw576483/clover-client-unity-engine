@@ -31,7 +31,7 @@ namespace CloverEngine
         WebSocket = 1,
         RawUdp = 2,
         Quic = 3,
-        WebTransport = 4,
+        // 与原枚举保持一致：WebTransport = 4 已删除（客户端从未实现，属死枚举值）。
     }
 
     // 注：ConnectionState / BigEndian / ClientFrame 不再在此声明 —— QuicHarness.csproj 直接链接了

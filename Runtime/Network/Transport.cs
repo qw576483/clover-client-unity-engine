@@ -210,8 +210,9 @@ namespace CloverEngine
             var web = Application.platform == RuntimePlatform.WebGLPlayer;
             if (web)
             {
-                // Web 家族当前**没有任何可用线路**：WebTransport 未实现；WebSocket 需要浏览器侧
-                // jslib 桥接（WebSocketConnection.ConnectAsync 在 WebGL 会直接抛 NotSupportedException）。
+                // Web 家族当前**没有任何可用线路**：WebTransport 在客户端从未实现（其死枚举值已删）；
+                // WebSocket 需要浏览器侧 jslib 桥接（WebSocketConnection.ConnectAsync 在 WebGL 会直接抛
+                // NotSupportedException）。
                 // 旧实现放行 WebSocket = 假可用（声明可用、连接必失败，失败还被掩盖到连接期）；
                 // 现在如实判 false，由线路规划把 WS 裁掉并写明原因（可见，不静默）。
                 // jslib 桥接落地后，从这里放行对应线路。

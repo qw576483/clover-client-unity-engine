@@ -505,12 +505,11 @@ namespace CloverEngine
             if (_depth == 0) _root.gameObject.SetActive(false);
         }
 
-        /// <summary>强制收掉全部层（断线 / 重登等场景的兜底，避免遮罩卡死界面）。当前引擎内无调用方（未接线）。</summary>
-        public void Reset()
-        {
-            _depth = 0;
-            _root.gameObject.SetActive(false);
-        }
+        // 说明：原 `public void Reset()`（强制把 _depth 归零并隐藏遮罩）已**删除**。
+        // 它所在的 LoadingLayer 是 internal 类型、门面 IUIManager 也未透出该入口，
+        // 引擎内与业务侧都没有任何调用点 —— 是一个"永远调不到"的死方法；
+        // 它想解决的「遮罩卡死」由 Dispose()（同样把 _depth 归零）覆盖：
+        // Dispose 在收起 UI 的路径上必然执行，Reset 只是它的弱化副本。
 
         /// <summary>驱动旋转。</summary>
         public void Tick(float dt)

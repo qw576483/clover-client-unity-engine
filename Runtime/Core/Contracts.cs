@@ -51,12 +51,19 @@ namespace CloverEngine
         private int _nextId;
 
         /// <summary>
-        /// 分配一个唯一的请求 ID，线程安全
+        /// 分配一个唯一的请求 ID，线程安全。
+        ///
+        /// 跳过 0：协议里 requestID == 0 专门表示「推送 / 不可靠消息」，不能拿它去配对回包。
+        /// <see cref="_nextId"/> 是 int，递增到 <see cref="int.MaxValue"/> 后回绕为负、
+        /// 强转 uint 再过一遍 0——虽然要 2^32 次分配才轮到，但一旦命中就是「请求被当推送」的静默错配。
         /// </summary>
-        /// <returns>新分配的请求 ID</returns>
+        /// <returns>新分配的请求 ID（保证 != 0）</returns>
         public uint AllocateRequestID()
         {
-            return (uint)Interlocked.Increment(ref _nextId);
+            var id = (uint)Interlocked.Increment(ref _nextId);
+            if (id == 0)
+                id = (uint)Interlocked.Increment(ref _nextId);
+            return id;
         }
 
         /// <summary>

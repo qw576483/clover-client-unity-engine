@@ -14,8 +14,8 @@
 | 包结构与程序集 | 本文 §1、§2 |
 | 网络与会话契约（N1–N13）、通用硬约束（G1–G13） | [`结构规则.md`](结构规则.md) §五 |
 | 具体某个模块的 API | 各模块代码注释（`Runtime/**` 不逐模块放 README，实现注释即文档） |
-| 客户端引擎的待办 | 工作区根 `客户端待做.md`（不在本引擎目录内） |
-| 服务端能力基线与缺口 | 工作区根 `服务器待做.md`、`game生成.md` |
+| 客户端引擎的已知问题与待办 | [`修复记录.md`](修复记录.md)（E 编号体系） |
+| 服务端能力基线与缺口 | 服务端仓库 `clover-server-engine`（其 `修复记录.md` + `结构规则.md`） |
 
 > **与服务端的关系**：对齐只发生在两个层面 ——
 > ① **API 语义**：`OnMsg` / `On` / `Timer.After/Every` / `Fsm.Trigger` 拼写与语义一致；
@@ -30,10 +30,12 @@
 com.clover.unity-engine/
 ├── Runtime/
 │   ├── Core/         基础域：Game / Event / Timer / Fsm / Dispatcher / Logger / LogThrottle
-│   │                 / LogBuffer / Setting / Json / DeviceId，以及**全部跨模块契约**（含协议载体类型）
+│   │                 / LogBuffer / Setting / Json / DeviceId / Rng / AStar / IsoLayout / Dir8 / Input，
+│   │                 以及**全部跨模块契约**（含协议载体类型）
 │   ├── Data/         数据域：CloverData / DataTable / Localization / CloverTable（读打表产物）/ FileSlotStore（一槽一文件）
-│   ├── Network/      网络域：Network / WebRequest / WorldSync / CloverAuth / SchemaRegistry
+│   ├── Network/      网络域：Network / WebRequest / WorldSync / CloverAuth / SchemaRegistryManager
 │   │                 / Lan（局域网寻服：UDP 旁路发现，子目录 Runtime/Network/Lan/）
+│   │                 / Quic（msquic 原生互操作，子目录 Runtime/Network/Quic/）
 │   ├── Resource/     资源域：后端抽象 / Resources / AssetBundle / 清单热更与下载器
 │   ├── Presentation/ 表现域：Scene / Entity / ObjectPool / Map（逻辑地图）/ UI / UIWidgets
 │   │                 / TextHooks（通用件文字接管点）/ SpriteAtlas / Animation / Sound / Input / Camera / Quality
@@ -47,8 +49,9 @@ com.clover.unity-engine/
 └── package.json
 ```
 
-> **以 `~` 结尾的目录 Unity 完全不扫描**（`Samples~` / `Tools~`）：它们不放 `.asmdef`、也不需要 `.meta`，
-> 因此**不能**往里面放任何运行时代码。
+> **以 `~` 结尾的目录 Unity 不扫描**（`Samples~` / `Tools~`）：它们不需要 `.meta`，也不参与包内编译，
+> 因此**不放包内运行时代码**。唯一例外是 UPM 样例 `Samples~/LoginFlow/`（`package.json` 的 `samples` 声明，
+> 用户导入后即出现在其工程的 `Assets/` 里并参与编译，自带 `CloverEngine.Samples.LoginFlow.asmdef`）。
 
 ---
 
@@ -100,7 +103,7 @@ CloverEngine.Presentation  → [Core]
 
 | 能力 | 说明 |
 |---|---|
-| Connection | 传输抽象：QUIC / TCP / WebSocket / RawUDP；**WebTransport 尚未实现**（见工作区根 `客户端待做.md` #2）；服务端已有的传输能力必须在客户端完成对应适配，按平台选择主链和降级链；TCP 连接异步化（`ConnectAsync` + `Connecting` 过渡态），含 5s 连接超时；**帧 / 消息大小上限三条线路统一 10 MiB**（与服务端同值 —— `ClientFrame.MaxBodySize`、`TcpConnection.MaxFramePayload` 软上限 + `HardMaxFramePayload` 硬上限、`WebSocketConnection.MaxMsgPayload` + `HardMaxMsgPayload`、`QuicConnection.MaxFrameSize`；客户端帧体超限在本地 `ClientFrame.Encode` 抛 `ArgumentException` 拦下，线路层软超告警、硬超断线） |
+| Connection | 传输抽象：QUIC / TCP / WebSocket / RawUDP；**WebTransport 尚未实现**（见 [`结构规则.md`](结构规则.md) §五 N6 / N10）；服务端已有的传输能力必须在客户端完成对应适配，按平台选择主链和降级链；TCP 连接异步化（`ConnectAsync` + `Connecting` 过渡态），含 5s 连接超时；**帧 / 消息大小上限三条线路统一 10 MiB**（与服务端同值 —— `ClientFrame.MaxBodySize`、`TcpConnection.MaxFramePayload` 软上限 + `HardMaxFramePayload` 硬上限、`WebSocketConnection.MaxMsgPayload` + `HardMaxMsgPayload`、`QuicConnection.MaxFrameSize`；客户端帧体超限在本地 `ClientFrame.Encode` 抛 `ArgumentException` 拦下，线路层软超告警、硬超断线） |
 | Session | 登录态：account / playerID（字符串）/ token / 线路 / requestID 分配 / 请求-回包配对 |
 | Router | `OnMsg(msgID, handler)` 注册派发，推送（requestID==0）走这里 |
 | Call 配对 | `Call<T>` 按 requestID 配对，回包 msgID 恒为 0；统一错误回包 msgID=`EMsg.Error`（body=`EErrorReply{err, code}`）→ 任务以 `CloverCallException` 结束（`Code` 为机器可读错误码，见 `ErrCode`）；`code=401` 时额外发布 `Net.OnUnauthorized`，业务据此回到登录流程；超时以 `TimeoutException` 结束（默认 10s，`GameConfig.CallTimeoutSeconds` 可配） |
@@ -416,7 +419,7 @@ LogThrottle / LogBuffer  // 静态类，直接 CloverEngine.LogThrottle.X / Clov
 | P2 表现全家桶 | Scene / Entity+View / UI（含通用件）/ SpriteAtlas / Animation（仅封装 Unity `Animator`）/ Sound / Input / Camera / Quality / WorldSync | 场景带预加载切换；服务器 AOI 事件驱动实体平滑移动；UI 数据绑定；摇杆驱动角色。**引擎不做本地预测**（见 §3.1），因此**没有**「预测档位可切换」这一项 |
 | P3 扩展能力 | Debugger 深度网络模拟、房间帧同步管道、Localization、更多平台性能调优 | 弱网 / 多线路下符合 N4~N9；帧上行下行通畅；平台适配稳定 |
 
-> 各期**剩余未完成项**逐条登记在工作区根 `客户端待做.md`，本文件不复述进度。
+> 各期的修复与**已知残留**逐条登记在 [`修复记录.md`](修复记录.md)（E 编号体系），本文件不复述进度。
 
 ---
 

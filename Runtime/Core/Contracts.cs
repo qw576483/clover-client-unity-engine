@@ -10,7 +10,7 @@ namespace CloverEngine
     // ============================================================================
     // 引擎跨模块契约层
     //
-    // 依赖规则（见 客户端待做.md 审查清单「asmdef 依赖方向」）：
+    // 依赖规则（见 结构规则.md 的 asmdef 依赖方向审查清单）：
     //   Network / Data / Resource / Presentation → Core 单向依赖，禁止反向引用。
     //
     // 因此全部对外契约（接口 + 接口签名用到的辅助类型）统一定义于本文件（Core 程序集），
@@ -467,7 +467,7 @@ namespace CloverEngine
 
     /// <summary>
     /// 世界同步接口，用于订阅服务器下发的世界数据推送与实体事件。
-    /// 推送来源：EMsg.PushPlayerFullSync（登录后玩家全量数据）与 EMsg.PushDataSync（数据增量，单条/批量两种形态）。
+    /// 推送来源：EMsg.PushPlayerFullSync（登录后玩家全量数据）与 EMsg.PushDataSync（数据增量，**服务端恒以批量形态下发**）。
     /// 动态 map 字段 JsonUtility 无法表达，统一经 MiniJson 解析为动态字典后回调。
     /// </summary>
     public interface IWorldSync

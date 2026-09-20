@@ -251,10 +251,10 @@ namespace CloverEngine
         /// 各平台的**真实**线路可用性。与架构文档 §N10 的期望存在差异，这里显式写出，
         /// 避免读者以为「配了就通」：
         /// <list type="bullet">
-        /// <item>Standalone / Editor Windows：TCP + WebSocket + 裸 UDP；QUIC 走 msquic 原生插件
+        /// <item>Standalone / Editor Windows：TCP + 裸 UDP；QUIC 走 msquic 原生插件
         /// —— 注意二进制**只随 Windows x64 入库**（<c>Runtime/Plugins/x86_64/msquic.dll</c>），
         /// Linux / macOS 需自行补 libmsquic 二进制后 QUIC 才会可用（能力探测会自动裁掉无二进制的平台）。</item>
-        /// <item><b>Android / iOS：TCP + WebSocket + 裸 UDP 已就绪；QUIC 需自建</b> ——
+        /// <item><b>Android / iOS：TCP + 裸 UDP 已就绪；QUIC 需自建</b> ——
         /// 移动端**并非做不了 QUIC**（QUIC 本身只是 UDP + TLS 1.3，两端平台都有栈），
         /// 缺的是 Unity 侧的现成实现：<c>System.Net.Quic</c> 在 Unity 与 .NET 移动端都不存在，
         /// msquic 也没有官方移动端构件（其 Android 支持未经官方验证，见 microsoft/msquic#4041）。

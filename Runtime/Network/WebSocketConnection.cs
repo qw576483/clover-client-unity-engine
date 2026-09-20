@@ -327,7 +327,7 @@ namespace CloverEngine
 
                     acc.Write(buffer, 0, result.Count);
                     // 增量校验硬上限：不能等整条消息拼完再查（对端发超大或永不结束的分片流会先把
-                    // 内存耗光，32 MiB 硬上限失去防护意义）。超限立即断链。
+                    // 内存耗光，10 MiB 硬上限失去防护意义）。超限立即断链。
                     if (acc.Length > HardMaxMsgPayload)
                     {
                         HandleLinkFailure(gen,

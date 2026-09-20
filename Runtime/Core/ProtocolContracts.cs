@@ -27,7 +27,7 @@ namespace CloverEngine
         /// <summary>正文内容</summary>
         public string content;
 
-        /// <summary>级别（info/warn/error 等）</summary>
+        /// <summary>级别（info / success / warning / error，与服务端 push.go 的 EAlertNotify.level 同值）</summary>
         public string level;
 
         /// <summary>展示样式</summary>

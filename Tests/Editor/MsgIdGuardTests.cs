@@ -7,7 +7,7 @@ using UnityEngine.TestTools;
 namespace CloverEngine.Tests
 {
     /// <summary>
-    /// 引擎保留消息号守卫测试（对应 `客户端待做.md` #10）：
+    /// 引擎保留消息号守卫测试（对应 `结构规则.md` §五 N3 的消息号约定）：
     /// 业务经 `Game.OnMsg` 注册 `msgID &lt;= EMsg.InternalMsgMax` 时必须被拒绝（打日志 + 不注册），
     /// 而引擎自己走 `_router.OnMsg` 的注册不受影响（本测试同时钉住这两条边界）。
     /// </summary>
@@ -18,7 +18,7 @@ namespace CloverEngine.Tests
         [TearDown]
         public void TearDown()
         {
-            // 全局静态 router：测试后清掉，避免影响其它用例（Game.OnMsg 在 router 为 null 时是 no-op）
+            // 全局静态 router：测试后清掉，避免影响其它用例（Game.OnMsg 在 router 为 null 时会打 Error 日志且不注册）
             Game.AttachRouter(null);
         }
 

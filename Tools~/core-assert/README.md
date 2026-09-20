@@ -13,7 +13,7 @@
 cd Tools~/core-assert
 
 dotnet run                                  # 常驻平台：落盘 / 原子写 / 往返 / 损坏留档
-dotnet run -p:DefineConstants=UNITY_WEBGL    # WebGL：无文件系统 ⇒ 降级为内存存储、不创建目录
+dotnet run --property:DefineConstants=UNITY_WEBGL    # WebGL：无文件系统 ⇒ 降级为内存存储、不创建目录
 ```
 
 两种构建**都要跑**：WebGL 分支在常驻平台下是死代码，只跑一种等于漏验一半。

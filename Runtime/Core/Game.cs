@@ -133,7 +133,7 @@ namespace CloverEngine
     ///   CloverData.InitDataTable(dir) / CloverData.InitLocalization(dir, lang)
     ///   CloverRes.Init(root)
     /// 该拆分维持 asmdef 依赖方向（Network/Data/Resource → Core 单向），
-    /// 详见 客户端待做.md 审查清单「asmdef 依赖方向」。
+    /// 详见 结构规则.md 的 asmdef 依赖方向审查清单。
     /// </summary>
     public static class Game
     {

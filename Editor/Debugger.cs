@@ -91,7 +91,7 @@ namespace CloverEngine.Editor
 
             // UDP 通道绑定状态：登录后网关经 TCP 下发绑定令牌、客户端完成 UDP 绑定后为 true。
             GUILayout.Label($"UDP Bound: {(net.IsUdpBound ? "Yes" : "No")}");
-            // 会话恢复标记：断线重连流程中已发送 ResumeSession 且未收到回包时为 true。
+            // 会话恢复标记：会话处于可恢复态（已登记恢复凭证）时为 true；Disconnect / Clear 后置 false。
             GUILayout.Label($"Resuming: {(nm != null && nm.SessionResuming ? "Yes" : "No")}");
             // 目标服务器地址与 UDP 通道地址。
             GUILayout.Label($"Server: {nm?.ServerAddr ?? "N/A"}  UDP: {nm?.UdpEndpoint ?? "N/A"}");

@@ -50,7 +50,7 @@ namespace CloverEngine
         /// <summary>场景标识推送：玩家进入/切换场景时下发所在服务端场景（scene_id + instance_id）</summary>
         public const uint PushSceneInfo = 4005;
 
-        /// <summary>通用错误回包（body 为 EErrorReply{err}），回包 msgID 使用该特殊值</summary>
+        /// <summary>通用错误回包（body 为 EErrorReply{err, code}），回包 msgID 使用该特殊值</summary>
         public const uint Error = 0xFFFFFFFF;
 
         /// <summary>引擎消息号上界，业务消息号必须大于该值</summary>

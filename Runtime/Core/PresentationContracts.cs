@@ -524,7 +524,7 @@ namespace CloverEngine
     // clover-server-engine/pkg/domain/mmo/mapdata/README.md）。
     //
     // ★ 边界：本接口只回答**空间事实**（这一格能不能走、地图多大）。
-    //   「输入 → 位移 → 贴着墙滑」那套**本地预测解算不在引擎**（见 结构规则.md §3.1），
+    //   「输入 → 位移 → 贴着墙滑」那套**本地预测解算不在引擎**（见 clover-client-unity-engine-index.md §3.1），
     //   业务拿这里的查询结果自己写即可。
 
     /// <summary>

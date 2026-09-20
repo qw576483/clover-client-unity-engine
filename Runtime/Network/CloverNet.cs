@@ -19,7 +19,7 @@ namespace CloverEngine
         /// 显式线路计划；非 null 时优先于 <paramref name="addr"/> / <paramref name="udpAddr"/>。
         /// 留空时按 <see cref="GameConfig.ServerAddr"/>（原生家族）+ <see cref="GameConfig.WsAddr"/>
         /// （Web 家族）自动拼计划，再由 <c>TransportPlanner</c> **按平台家族裁剪**：
-        /// 原生端只保留 TCP/RawUDP，WebGL 只保留 WebSocket。两者不会同时生效。
+        /// 原生端保留 QUIC → TCP + 裸 UDP（无 msquic 二进制时自动裁掉 QUIC）；WebGL 当前无可用线路（WebTransport 未实现、WebSocket 需 jslib 桥接）。两者不会同时生效。
         /// </param>
         public static void Init(string addr = null, string udpAddr = null, TransportOptions plan = null)
         {

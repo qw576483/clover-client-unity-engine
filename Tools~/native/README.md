@@ -27,7 +27,7 @@ Unity 只按**固定的特殊目录名**识别平台插件。放错目录会让�
 | Windows x64（Editor + Standalone） | `Runtime/Plugins/x86_64/` | `msquic.dll` | ✅ 已就位（Schannel 版，只依赖 `bcrypt`/`ncrypt`） |
 | Linux x64 | `Runtime/Plugins/x86_64/` | `libmsquic.so` | ⬜ 未做（`Tools~/native/` 脚本可改造复用） |
 | macOS（x64 / arm64） | `Runtime/Plugins/x86_64/` | `libmsquic.dylib` | ⬜ 未做 |
-| **Android arm64-v8a** | `Runtime/Plugins/Android/libs/arm64-v8a/` | `libmsquic.so` | ✅ **已产出**（3.58 MB，ELF64/AArch64，见下） |
+| **Android arm64-v8a** | `Runtime/Plugins/Android/libs/arm64-v8a/` | `libmsquic.so` | ✅ **已产出**（6.48 MB，ELF64/AArch64，见下） |
 | **Android armeabi-v7a** | `Runtime/Plugins/Android/libs/armeabi-v7a/` | `libmsquic.so` | ✅ **已产出**（2.72 MB，ELF32/ARM） |
 | **Android x86_64** | `Runtime/Plugins/Android/libs/x86_64/` | `libmsquic.so` | ✅ **已产出**（7.1 MB，ELF64/x86-64；x86_64 模拟器用，补齐此前缺的 ABI） |
 | iOS | `Runtime/Plugins/iOS/` | `libmsquic.a` | ⬜ 需 mac + Xcode（步骤见文末） |

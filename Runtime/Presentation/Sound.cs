@@ -105,7 +105,7 @@ namespace CloverEngine
         private readonly List<AudioSource> _appPausedSources = new();
 
         /// <summary>
-        /// 创建声音管理器，初始化 BGM 双音源、8 个音效池音源，并将所有分组音量设为 1
+        /// 创建声音管理器，初始化 BGM 双音源、32 个音效池音源，并将所有分组音量设为 1
         /// </summary>
         public SoundManager()
         {

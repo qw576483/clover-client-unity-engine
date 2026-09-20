@@ -6,7 +6,7 @@ using NUnit.Framework;
 namespace CloverEngine.Tests
 {
     /// <summary>
-    /// QUIC 流分帧的逐字节用例（对应 <c>客户端待做.md</c> #1/#3 的"线格式"部分）。
+    /// QUIC 流分帧的逐字节用例（对应 <c>结构规则.md</c> §五 N2 的线格式部分）。
     ///
     /// <para>
     /// 这些断言存在的理由很具体：帧格式错**不会**编译报错、也**不会**在客户端报错 ——

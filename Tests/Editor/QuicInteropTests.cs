@@ -6,7 +6,7 @@ using UnityEngine;
 namespace CloverEngine.Tests
 {
     /// <summary>
-    /// QUIC 线路的原生互操作与线路规划测试（对应 <c>客户端待做.md</c> #1 / #3）。
+    /// QUIC 线路的原生互操作与线路规划测试（对应 <c>结构规则.md</c> §五 N6 的线路交付要求）。
     ///
     /// <para>
     /// 覆盖两件**互相独立**的事，分开断言以便失败时一眼定位：

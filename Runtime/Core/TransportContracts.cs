@@ -141,7 +141,7 @@ namespace CloverEngine
         /// 按地址拼出默认顺序：TCP（原生家族）+ WebSocket（Web 家族）。
         /// <para>
         /// **两者不会同时生效**：运行平台只属于一个家族（依据 <c>结构规则.md</c> §五 N10）——
-        /// 原生端只保留 TCP，WebGL 只保留 WebSocket，由
+        /// 原生端保留 QUIC / TCP / 裸 UDP（QUIC 不可用时裁掉），WebGL 当前无可用线路，由
         /// <c>TransportPlanner.ApplyPlatformRules</c> 按平台裁剪，被裁掉的那条会记进日志。
         /// 因此「TCP 连不上就退到 WS」这种情况**不会发生**：那不是降级，是换协议家族。
         /// </para>

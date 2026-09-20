@@ -61,7 +61,7 @@ namespace CloverEngine
     ///
     /// 线协议约定（与 clover-server-engine 对齐）：
     ///   - 客户端帧：[4B requestID][4B msgID][JSON body]，大端；
-    ///   - 回包 msgID 恒为 0，按 requestID 配对；错误回包 msgID 为 EMsg.Error（body 为 EErrorReply{err}）；
+    ///   - 回包 msgID 恒为 0，按 requestID 配对；错误回包 msgID 为 EMsg.Error（body 为 EErrorReply{err, code}）；
     ///   - 推送 requestID 恒为 0；不可靠消息 requestID 恒为 0；
     ///   - 登录后网关经 TCP 下发 EMsg.UDPBindGrant（体为绑定令牌 UTF-8 原文，非 JSON），
     ///     客户端建 UDP socket 后经 UDP 发 EMsg.BindUDP（体为令牌原文）完成端点绑定；

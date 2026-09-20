@@ -12,7 +12,7 @@ namespace CloverEngine
     /// 格式契约（逐字节）见 [`clover-server-engine/pkg/domain/mmo/mapdata/README.md`](https://github.com/qw576483/clover-server-engine/blob/main/pkg/domain/mmo/mapdata/README.md)。
     ///
     /// ★ 本模块**只回答空间事实**（这一格能不能走）。「输入 → 位移 → 贴墙滑动」那套本地预测解算
-    /// 不在引擎（见 `结构规则.md` §3.1）：业务拿 <see cref="WalkableAt"/> 自己写即可，
+    /// 不在引擎（见 `clover-client-unity-engine-index.md` §3.1 网络域「移动预测」）：业务拿 <see cref="WalkableAt"/> 自己写即可，
     /// 因为"用多大半径、几点采样、撞墙是停还是滑"都是玩法手感，不是引擎该定的。
     ///
     /// 客户端**只解位图 + 头部标量**：碰撞体 AABB 与出生点是服务端的事（客户端解析了也没人看），

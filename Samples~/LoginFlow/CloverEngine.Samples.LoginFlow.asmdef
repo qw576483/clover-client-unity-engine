@@ -1,0 +1,20 @@
+{
+    "name": "CloverEngine.Samples.LoginFlow",
+    "rootNamespace": "CloverEngine.Samples",
+    "references": [
+        "CloverEngine.Core",
+        "CloverEngine.Data",
+        "CloverEngine.Network",
+        "CloverEngine.Resource",
+        "CloverEngine.Presentation"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

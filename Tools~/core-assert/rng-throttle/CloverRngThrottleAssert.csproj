@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    离线断言宿主：Rng（可复现随机）+ LogThrottle（日志降频 / 时钟三级）。
+
+    为什么单独一个 csproj（而不是并进 ../CloverCoreAssert.csproj）：
+      父宿主已有自己的 Program.Main，两个 Main 会编译失败；而本仓规则要求「纯新增、不改既有文件」，
+      所以不动父项目，改为子目录自带宿主（父宿主的排除写在 ../Directory.Build.targets）。
+      与父宿主同法：**直接链接真实引擎源码**（不做副本 —— 副本会漂移）。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <LangVersion>9.0</LangVersion>
+    <AssemblyName>CloverRngThrottleAssert</AssemblyName>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoWarn>CS0067;CS0649;CS0169;CS0414</NoWarn>
+  </PropertyGroup>
+
+  <!-- 直接链接**真实引擎源码**：引擎改了这里立刻反映，不存在「两份代码漂移」 -->
+  <ItemGroup>
+    <Compile Include="../../../Runtime/Core/Rng.cs" Link="engine/Rng.cs" />
+    <Compile Include="../../../Runtime/Core/LogThrottle.cs" Link="engine/LogThrottle.cs" />
+    <!-- ILogger / LogLevel 的真实定义来自 Logger.cs（宿主不再重定义一份） -->
+    <Compile Include="../../../Runtime/Core/Logger.cs" Link="engine/Logger.cs" />
+    <Compile Include="../../../Runtime/Core/ConsoleLogger.cs" Link="engine/ConsoleLogger.cs" />
+  </ItemGroup>
+
+</Project>

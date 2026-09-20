@@ -1,0 +1,27 @@
+{
+    "name": "com.clover.unity-engine",
+    "version": "0.1.0",
+    "displayName": "Clover Unity Engine",
+    "description": "Unity C# client engine with capability-domain architecture",
+    "unity": "6000.0",
+    "unityRelease": "0f1",
+    "dependencies": {
+        "com.unity.ugui": "1.0.0"
+    },
+    "keywords": [
+        "game-engine",
+        "client",
+        "framework"
+    ],
+    "samples": [
+        {
+            "displayName": "LoginFlow Demo",
+            "description": "注册/登录/会话建立/全量同步与断线恢复的完整接入示例",
+            "path": "Samples~/LoginFlow"
+        }
+    ],
+    "author": {
+        "name": "Clover",
+        "url": ""
+    }
+}

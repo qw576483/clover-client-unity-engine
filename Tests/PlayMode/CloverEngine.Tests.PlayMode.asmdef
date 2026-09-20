@@ -1,0 +1,26 @@
+{
+    "name": "CloverEngine.Tests.PlayMode",
+    "rootNamespace": "CloverEngine.Tests",
+    "references": [
+        "CloverEngine.Core",
+        "CloverEngine.Data",
+        "CloverEngine.Network",
+        "CloverEngine.Resource",
+        "CloverEngine.Presentation",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

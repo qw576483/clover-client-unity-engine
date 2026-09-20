@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <LangVersion>9.0</LangVersion>
+    <AssemblyName>CloverCoreAssert</AssemblyName>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoWarn>CS0067;CS0649;CS0169;CS0414</NoWarn>
+  </PropertyGroup>
+
+  <!-- 直接链接**真实引擎源码**（不做副本：副本会漂移） -->
+  <ItemGroup>
+    <Compile Include="../../Runtime/Core/Json.cs" Link="engine/Json.cs" />
+    <Compile Include="../../Runtime/Core/Event.cs" Link="engine/Event.cs" />
+    <Compile Include="../../Runtime/Core/Setting.cs" Link="engine/Setting.cs" />
+    <Compile Include="../../Runtime/Core/Logger.cs" Link="engine/Logger.cs" />
+    <Compile Include="../../Runtime/Core/ConsoleLogger.cs" Link="engine/ConsoleLogger.cs" />
+  </ItemGroup>
+
+</Project>

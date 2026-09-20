@@ -1,0 +1,17 @@
+<Project>
+
+  <!--
+    本文件只为「本目录下新增的子断言宿主」服务，**不修改任何既有文件**。
+
+    背景：SDK 默认把项目目录下 `**/*.cs` 全部算进项目（EnableDefaultCompileItems）。
+    `rng-throttle/` 是「Rng / LogThrottle」这两个通用底座的离线断言宿主，它自带 csproj 与
+    自己的 Program.Main —— 若不排除，父宿主 CloverCoreAssert 会同时看到两个 Main 而编译失败。
+    因此在这里（Directory.Build.targets，晚于默认 glob 求值）把子目录从父宿主的编译项里摘掉。
+
+    条件限定死了项目名：子宿主自己（CloverRngThrottleAssert）不受影响。
+  -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'CloverCoreAssert'">
+    <Compile Remove="rng-throttle/**/*.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,16 @@
+{
+    "name": "CloverEngine.Data",
+    "rootNamespace": "CloverEngine",
+    "references": [
+        "CloverEngine.Core"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

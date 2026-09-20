@@ -1,0 +1,22 @@
+<linker>
+  <!--
+    托管代码裁剪保护（IL2CPP / 高等级 stripping）：
+    表现域输入后端（Presentation/Input.cs 的 InputSystemBackend / InputInfrastructure）为了不硬引用
+    Unity.InputSystem（未装包的项目必须能编译），全程用 Type.GetType + 反射属性/方法访问这些类型。
+    仅靠反射访问的类型会被 linker 剔除 → 真机包上 Available=false（Active Input Handling 只勾新输入时
+    落到 NullInputBackend，键鼠 / 手柄 / 触摸 / uGUI 点击静默全灭）。
+    这里按类型精确保留（不整包保留，避免吞掉输入系统自身的裁剪收益）。
+  -->
+  <assembly fullname="Unity.InputSystem">
+    <type fullname="UnityEngine.InputSystem.Keyboard" preserve="all" />
+    <type fullname="UnityEngine.InputSystem.Mouse" preserve="all" />
+    <type fullname="UnityEngine.InputSystem.Gamepad" preserve="all" />
+    <type fullname="UnityEngine.InputSystem.Touchscreen" preserve="all" />
+    <type fullname="UnityEngine.InputSystem.Key" preserve="all" />
+    <type fullname="UnityEngine.InputSystem.Keyboard/Key" preserve="all" />
+  </assembly>
+  <!-- uGUI 的新输入输入模块（包内独立程序集；旧版本可能落在 Unity.InputSystem） -->
+  <assembly fullname="Unity.InputSystem.ForUI">
+    <type fullname="UnityEngine.InputSystem.UI.InputSystemUIInputModule" preserve="all" />
+  </assembly>
+</linker>

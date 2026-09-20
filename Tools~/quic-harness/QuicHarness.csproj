@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    QUIC 原生互操作的控制台试验台（**不进 Unity、不进包**）。
+
+    为什么要有它：msquic 用错时的失败形式是**进程级崩溃**（实测 Windows 事件日志
+    `Faulting module: msquic.dll`，异常码 0xc0000420 = STATUS_ASSERTION_FAILURE），
+    在 Unity 里表现为"编辑器直接消失"——既看不到托管堆栈，也拿不到确定性复现，
+    而且每次复现都要等 3 分钟编辑器启动。放到控制台里：秒级复现 + 崩溃退出码可读。
+
+    关键设计：**直接链接引擎里的真实源码**（不是复制一份），所以这里验证过的绑定
+    就是 Unity 里跑的那份，不存在"两份代码漂移"。缺的 Unity 依赖由 Stubs.cs 补。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>quic-harness</AssemblyName>
+    <RootNamespace>CloverEngine</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- CS0649：试验台不驱动 TLS 线路（Connection.cs 的 UseTls 从未赋值），链接真实源码后的预期告警 -->
+    <NoWarn>$(NoWarn);CS0067;CS0169;CS0414;CS0649</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Stubs.cs" />
+    <!-- 通配链接 Quic/ 下的**全部**真实源码：新增文件自动纳入，不会出现"试验台漏链接新文件仍按旧代码跑通"。
+         另显式链接 Quic 之外被用到的真实源码：
+           - Connection.cs（ClientFrame / BigEndian / ConnectionState —— 旧版在 Stubs.cs 里复制了一份，会漂移）；
+           - EMsg.cs（消息号常量 —— 冒烟用例不再硬编码 4110/4003）。 -->
+    <Compile Include="../../Runtime/Network/Quic/*.cs" />
+    <Compile Include="../../Runtime/Network/Connection.cs" />
+    <Compile Include="../../Runtime/Network/EMsg.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 原生库随输出目录：DllImport("msquic") 会在 exe 同目录找到它 -->
+    <None Include="../../Runtime/Plugins/x86_64/msquic.dll">
+      <Link>msquic.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

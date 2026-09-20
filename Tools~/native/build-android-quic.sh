@@ -43,8 +43,9 @@ API="${ANDROID_API:-26}"
 MSQUIC_TAG="${MSQUIC_TAG:-v2.4.16}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENGINE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"          # clover-client-unity-engine
-REPO_DIR="$(cd "$ENGINE_DIR/.." && pwd)"               # 仓库根（full-dev）
+ENGINE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"          # 本仓库根（clover-client-unity-engine）
+REPO_DIR="$ENGINE_DIR"                                 # 仓库根 == ENGINE_DIR：本包已是独立 git 仓库，
+                                                       # 不再是 monorepo 里的一级目录，故不能取上级目录
 BUILD_ROOT="${QUIC_BUILD_ROOT:-$REPO_DIR/_native_build}"
 SRC_DIR="$BUILD_ROOT/msquic"
 OUT_DIR="$BUILD_ROOT/out/$ABI"

@@ -6,7 +6,7 @@ namespace CloverEngine
     /// 鼠标位移 → 视角（yaw / pitch）累加器 —— **纯逻辑**（刻意**不是** <c>MonoBehaviour</c>：
     /// 无生命周期依赖 ⇒ 可离线断言）。
     ///
-    /// <para><b>出处</b>：能力下沉（E-core-18）。语义**逐字照搬** <c>clover-project-cs16</c> 的
+    /// <para><b>出处</b>：能力下沉。语义**逐字照搬** <c>clover-project-cs16</c> 的
     /// <c>client/Assets/Scripts/Module/Player/PlayerMotor.cs</c>（<c>ApplyMouseLook</c> / <c>ForceLook</c>；
     /// 原处**已改为持有本件**、⛔ 不留副本）
     /// —— 那套符号方向、夹紧口径与灵敏度口径是**已验收的手感**，⛔ 不许"顺手修正"：</para>

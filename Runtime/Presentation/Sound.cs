@@ -12,7 +12,7 @@
 //        池满之后 `GetAvailableSource` 只能丢弃后面的音效（枪声/脚步互相顶掉）；
 //     ③ 没有"缺失只告警一次"的口径（每次调用都报）。
 //   另有一处**日志通道**上的不一致（不是上面三个短板之一，但同属"通用能力该有却没有"）：
-//   `GetAvailableSource` 的池满告警自带一个 `bool` 只报一次，而引擎（E-core-06 / E-core-14）已有的
+//   `GetAvailableSource` 的池满告警自带一个 `bool` 只报一次，而引擎已有的
 //   `LogThrottle.WarnOnce` / `WarnThrottled` 在本文件里**一处都没用上**（本轮一并归零，见语义约束 ⑥）。
 //   本片把这三件收敛进引擎（`结构规则.md` §4.4：**已有能力不够用时优先扩展原实现**，⛔ 不准平行再起一套）。
 //
@@ -95,7 +95,7 @@ namespace CloverEngine
         // PlayBGM 的请求序号：异步加载完成时若已有更新的请求（或已 Dispose）则丢弃旧结果（防双 BGM 同播 / 旧曲覆盖新曲）。
         private int _bgmRequestId;
         private bool _poolExhaustedWarned;
-        // ── 播放闸门（E-core-17）的记账：**只有需要时才用**，默认值下恒定不参与 ──
+        // ── 播放闸门的记账：**只有需要时才用**，默认值下恒定不参与 ──
         // 单帧起播计数 + 它属于哪一帧。计数只在**真正起播**（异步回调里、取到音源之前）时累加，
         // 所以"加载晚到的音效"算在它真正响的那一帧，而不是它被请求的那一帧。
         private int _framePlays;
@@ -181,7 +181,7 @@ namespace CloverEngine
             _appPausedSources.Clear();
         }
 
-        // ── 播放闸门（E-core-17）：两个都可配，默认 0 = 不限 = 与下沉前逐字一致 ──────────
+        // ── 播放闸门：两个都可配，默认 0 = 不限 = 与下沉前逐字一致 ──────────
         //
         // 为什么要暴露在 ISoundManager 上（而不是只做 SoundManager 的内部字段）：
         // 实现类 internal（G1），业务只拿得到 `Game.Sound`（接口）—— 挂在实现类上等于"业务配不了"，
@@ -265,7 +265,7 @@ namespace CloverEngine
             {
                 if (clip == null)
                 {
-                    // 缺失只报一次/路径（E-core-17）：BGM 也是 `clip == null` 的缺失分支，与下面三处
+                    // 缺失只报一次/路径：BGM 也是 `clip == null` 的缺失分支，与下面三处
                     // SFX / Voice 同口径 —— 文件头语义约束 ⑤ 说的就是**所有**缺失只报一次。
                     // 原先这里是**每次 PlayBGM** 都裸打一条 Warn（缺 BGM 的工程每次切曲都刷一条）。
                     // 只换日志发射通道：BGM 的播放 / 淡入淡出 / 请求序号判定一行未动。
@@ -331,7 +331,7 @@ namespace CloverEngine
             {
                 if (clip == null)
                 {
-                    // 缺失只报一次/路径（E-core-17）：原先是**每次调用**一条裸 Warn —— 脚步 / 命中
+                    // 缺失只报一次/路径：原先是**每次调用**一条裸 Warn —— 脚步 / 命中
                     // 这种每秒多次的高频路径一旦某个音效没落地，日志就被它刷爆（真问题反而看不见）。
                     LogThrottle.WarnOnce("Sound", "missing:" + path, $"音效加载失败（clip 为空）：{path}");
                     return;
@@ -357,7 +357,7 @@ namespace CloverEngine
             {
                 if (clip == null)
                 {
-                    // 同上：缺失只报一次/路径（E-core-17），⛔ 不再是每次一条裸 Warn。
+                    // 同上：缺失只报一次/路径，⛔ 不再是每次一条裸 Warn。
                     LogThrottle.WarnOnce("Sound", "missing:" + path, $"3D 音效加载失败（clip 为空）：{path}");
                     return;
                 }
@@ -383,7 +383,7 @@ namespace CloverEngine
             {
                 if (clip == null)
                 {
-                    // 同上：缺失只报一次/路径（E-core-17），⛔ 不再是每次一条裸 Warn。
+                    // 同上：缺失只报一次/路径，⛔ 不再是每次一条裸 Warn。
                     LogThrottle.WarnOnce("Sound", "missing:" + path, $"人声加载失败（clip 为空）：{path}");
                     return;
                 }
@@ -547,7 +547,7 @@ namespace CloverEngine
                 if (source == null) yield break;
 
                 // 用 unscaledDeltaTime：timeScale=0（暂停 / 结算屏）时淡入淡出仍要走完，
-                // 否则音量卡在中途、_fades 项也永远清不掉（同 E1 的 Timer unscaled 教训）。
+                // 否则音量卡在中途、_fades 项也永远清不掉（同 Timer unscaled 教训）。
                 elapsed += Time.unscaledDeltaTime;
                 var t = Mathf.Clamp01(elapsed / duration);
                 source.volume = Mathf.Lerp(from, to, t);
@@ -572,7 +572,7 @@ namespace CloverEngine
 
             // 池全忙：原实现强制返回 _sfxPool[0]，把正在播放的音效 / 人声**静默打断**。
             // 改为丢弃本次播放并留一次告警（只报一次，避免高频音效刷屏）。
-            // E-core-17 只换**日志发射通道**（裸 Warn ⇒ LogThrottle）：取源失败后 return null 的池逻辑
+            // 只换**日志发射通道**（裸 Warn ⇒ LogThrottle）：取源失败后 return null 的池逻辑
             // 一行未动，`_poolExhaustedWarned` 也**原样保留** —— 于是"只报一次"的语义逐字不变。
             if (!_poolExhaustedWarned)
             {

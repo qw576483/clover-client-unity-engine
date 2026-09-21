@@ -184,7 +184,7 @@ namespace CloverEngine
         /// <para>推导：`GridToWorld` 是 `x = (gx − gy)·HalfW`、`y = −(gx + gy + 1)·HalfH`
         /// ⇒ `Δworld = ( (Δgx − Δgy)·HalfW , −(Δgx + Δgy)·HalfH )`。
         /// 所以 `(0, +1)` 是**屏幕左下 = SW**，`(+1, +1)` 才是**屏幕正下 = S**。</para>
-        /// <para>⛔ **E-core-19（本表曾被整档逆时针偏 45°）**：旧实现把 `(0,+1)` 返回 `S`、`(+1,+1)` 返回 `SE`…
+        /// <para>⛔ **本表曾被整档逆时针偏 45°**：旧实现把 `(0,+1)` 返回 `S`、`(+1,+1)` 返回 `SE`…
         /// —— 结果是「人物朝向看着不对」：格增量算出的朝向比真实屏幕朝向**少一档**，
         /// 再叠加素材（`.dcc` 8 向图）就是整体错位，且**不报错、不打日志**。
         /// 自洽判据：`DirectionDelta(DirectionTo(delta))` 必须与 `delta` 的**符号方向一致**。</para>
@@ -229,7 +229,7 @@ namespace CloverEngine
         ///   S  → ( +1, +1)    SW → ( 0, +1)    W  → (−1, +1)    NW → (−1,  0)
         ///   N  → (−1, −1)    NE → ( 0, −1)    E  → ( +1, −1)    SE → ( +1,  0)
         /// </code>
-        /// <para>自洽判据（E-core-19 的最小复现）：8 个格增量逐个断言
+        /// <para>自洽判据（最小复现）：8 个格增量逐个断言
         /// `DirectionDelta(DirectionTo(delta))` 与 `delta` 的**符号方向一致**。</para>
         /// </summary>
         public Vector2Int DirectionDelta(Dir8 dir)

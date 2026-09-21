@@ -79,7 +79,7 @@ namespace CloverEngine
         ///
         /// <para>
         /// <b>默认值 = 引擎原先把死的值</b>（连同 <see cref="MatchWidthOrHeight"/> = 0.5），
-        /// 因此不设置它时行为与旧版**逐字一致**，既有横版项目不受影响（见 `修复记录.md` E-ui-01）。
+        /// 因此不设置它时行为与旧版**逐字一致**，既有横版项目不受影响。
         /// </para>
         /// </summary>
         public static Vector2 ReferenceResolution { get; set; } = new Vector2(1920f, 1080f);

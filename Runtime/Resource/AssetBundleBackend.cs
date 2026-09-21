@@ -150,7 +150,7 @@ namespace CloverEngine
                 return null;
             }
 
-            // ★ 同 ResourcesBackend 的 E-res-01：若 LoadAssetAsync 在调用的同一帧已完成，
+            // ★ 同 ResourcesBackend（实测修复）：若 LoadAssetAsync 在调用的同一帧已完成，
             //   completed 事件不会再触发 —— 那会让上游 pending 永远卡在 _inflight（该路径此后一直加载不出来）。
             if (req.isDone)
             {

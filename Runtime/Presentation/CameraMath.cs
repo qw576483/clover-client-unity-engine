@@ -5,7 +5,7 @@ namespace CloverEngine
     /// <summary>
     /// 相机相关的**纯函数**：水平/垂直 FOV 换算、yaw/pitch → 视线方向、指数平滑跟随。
     ///
-    /// <para><b>出处</b>：能力下沉（E-core-18）。三个函数搬自 <c>clover-project-cs16</c> 的
+    /// <para><b>出处</b>：能力下沉。三个函数搬自 <c>clover-project-cs16</c> 的
     /// <c>client/Assets/Scripts/Module/CameraRig/FirstPersonCamera.cs</c>（<b>逐字搬移</b>，
     /// 数值与分支一个都没动 —— 那是已验收的 FOV 口径与镜头手感）；原处**已改为调用本件**、
     /// ⛔ 不留同名 `private static` 副本。</para>

@@ -62,7 +62,6 @@ CloverNet.Init("127.0.0.1:8002", "127.0.0.1:8003");
 |---|---|
 | [`结构规则.md`](结构规则.md) | 结构铁律：目录归属、依赖方向、命名、契约，以及网络与会话契约（N1–N13）、通用硬约束（G1–G13） |
 | [`clover-client-unity-engine-index.md`](clover-client-unity-engine-index.md) | 索引：包结构、能力域、模块总览 |
-| [`修复记录.md`](修复记录.md) | E 编号体系的缺陷修复记录 |
 | [clover-doc](https://github.com/qw576483/clover-doc) | 在线文档（`client/` 一节） |
 
 ## 相关仓库

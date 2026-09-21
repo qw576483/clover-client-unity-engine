@@ -152,7 +152,7 @@ namespace CloverEngine
             text.verticalOverflow = VerticalWrapMode.Overflow;
             text.supportRichText = false;
 
-            // ★ E-core-12（2026-09-19，纯新增）：通知"文字渲染挂钩"。
+            // ★ 2026-09-19 纯新增：通知"文字渲染挂钩"。
             //   ① 位置必须在**最后**：文案 / 字号 / 对齐 / 颜色 / 溢出策略都已就位，挂钩里才读得到
             //      （挂钩会把这些当数据源，例如按 fontSize 选字模档位）；也才不会被上面的
             //      `text.font = DefaultFont()` 覆盖回去（本例里挂钩通常把 font 清成 null）。

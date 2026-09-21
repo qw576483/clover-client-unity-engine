@@ -51,10 +51,10 @@ namespace CloverEngine
 
             var scaler = _root.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            // ★ E-ui-01：参考分辨率与匹配权重改为**可配置**（`CloverPresentation.ReferenceResolution` /
+            // ★ 画布适配可配置：参考分辨率与匹配权重改为**可配置**（`CloverPresentation.ReferenceResolution` /
             //   `.MatchWidthOrHeight`），默认值 = 本文件原先写死的 1920×1080 / 0.5
             //   ⇒ 不配置时行为与旧版逐字一致（横版项目零影响）；竖版项目在 Game.Launch **之前**
-            //   设成 1080×1920 / match=0（见 `修复记录.md` E-ui-01）。
+            //   设成 1080×1920 / match=0。
             //   ⛔ 这里只读一次，Launch 之后改这两个属性不生效（画布已建好）。
             scaler.referenceResolution = CloverPresentation.ReferenceResolution;
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
@@ -78,7 +78,7 @@ namespace CloverEngine
 
             // 通用件各自挂在自己那一层：Toast/飘字进 Top，Loading/引导进 System（最高），确认框进 Top。
             //
-            // ★ E-2026-09-17-01（本项目实测到的引擎缺陷，最小修复）：
+            // ★ 本项目实测到的引擎缺陷（2026-09-17），最小修复：
             //   确认框原先挂在 **Popup** 层（`UILayer.Popup = 2`），而**暂停菜单 / 死亡屏在 `Top = 3`**
             //   （见 `Core/PresentationContracts.cs:20-27` 的层序 Background=0 < Normal=1 < Popup=2 < Top=3 < System=4）。
             //   Top 层的节点在层级里排在 Popup 之后 ⇒ 它的所有子节点**画在确认框之上、且先被射线命中**
@@ -93,7 +93,7 @@ namespace CloverEngine
             _confirm = new ConfirmLayer(_layers[(int)UILayer.Top]);
             _guide = new GuideLayer((RectTransform)_layers[(int)UILayer.System]);
 
-            // ★ E-ui-01：把**实际生效**的画布适配参数打出来（判据用，一次）。
+            // ★ 把**实际生效**的画布适配参数打出来（判据用，一次）。
             //   竖版项目应看到「参考分辨率=1080×1920 / match=0 / Screen=<宽>×<高>（高 > 宽）」；
             //   若这里仍是 1920×1080，说明业务侧那两行写在了 Game.Launch **之后**（改晚了，不生效）。
             Game.Logger?.Info("UI",
@@ -365,7 +365,7 @@ namespace CloverEngine
             // 通用件先于面板推进：它们与窗口栈无关，即使一个业务面板都没开也要动
             // （否则 Toast 不淡出、Loading 不转、确认框停在原地）。
             // ★ 通用件用**不受 timeScale 影响**的 dt：暂停 / 结算（timeScale=0）时 Loading 仍要转、
-            //   Toast 仍要淡出，否则遮罩停转、提示永不消失（同 E1 的 Timer unscaled 教训）。
+            //   Toast 仍要淡出，否则遮罩停转、提示永不消失（同 Timer unscaled 教训）。
             var widgetDt = Time.unscaledDeltaTime;
             TickWidget(_toasts.Tick, widgetDt, "Toast");
             TickWidget(_floats.Tick, widgetDt, "FloatText");

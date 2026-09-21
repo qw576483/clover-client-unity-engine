@@ -88,7 +88,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 单个 Call 的**总期限**下限（秒）：排队期间每收到一条位置帧就顺延一次超时，
-        /// 没有总期限时服务端只要持续刷新位置，在途 Call 就永远不会超时（E-net-01）。
+        /// 没有总期限时服务端只要持续刷新位置，在途 Call 就永远不会超时。
         /// 实际取值 = max(本值, CallTimeoutSeconds)，保证总期限不会反过来短于单次超时。
         /// <para>
         /// **为什么客户端必须有这个总期限**：队列停滞期（服务端排队中）**不下发位置帧**，
@@ -912,7 +912,7 @@ namespace CloverEngine
 
             // 序列化与组帧**必须**在 try 内：ClientFrame.Encode 在 body > 10 MiB（ClientFrame.MaxBodySize）时抛 ArgumentException，
             // 放在 try 外会让异常逃逸，而此时配对项与超时定时器都已建好 —— 请求只能干等超时，
-            // 字典项也残留到超时为止（E-net-02）。
+            // 字典项也残留到超时为止。
             try
             {
                 // 通道加密协商：登录请求自动声明「支持加密」，业务无需知道这个字段的存在。
@@ -1030,7 +1030,7 @@ namespace CloverEngine
             if (msgID == EMsg.QueuePosition)
             {
                 // JsonUtility 对非法 JSON 是**抛异常**而不是返回 null：不包 try/catch 会让异常
-                // 穿出 DrainFrame → Game.Tick，主循环每帧抛一次（E-net-03）。
+                // 穿出 DrainFrame → Game.Tick，主循环每帧抛一次。
                 EQueuePositionNotify pos = null;
                 if (bodyLength > 0)
                 {

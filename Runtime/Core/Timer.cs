@@ -228,7 +228,7 @@ namespace CloverEngine
         public void Stop(long id)
         {
             // 0 / 负数 = 「无效 / 未持有」哨兵，绝不能进墓碑集合。
-            // 实测（2026-09-19，客户端 E 编号见 修复记录.md）：SceneModule 用 0 初始化 _progressTimerId 且无条件 Stop(它)，
+            // 实测（2026-09-19）：SceneModule 用 0 初始化 _progressTimerId 且无条件 Stop(它)，
             // 而旧实现 id 从 0 起发 ⇒ Stop(0) 把 0 写进墓碑，紧接着新建的进度轮询 timer 正好拿到 id 0
             // ⇒ 它在第一次 Tick 就被墓碑移除、一次都没轮询 ⇒ progress 停在 0.9、allowSceneActivation
             // 永不置 true ⇒ 场景永不激活 ⇒ 全新 Play 会话第一次 Game.Scene.Load 必死（表现为黑屏）。

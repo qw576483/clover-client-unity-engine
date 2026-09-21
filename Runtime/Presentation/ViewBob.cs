@@ -35,7 +35,7 @@ namespace CloverEngine
     /// 第一人称的视点晃动与落地沉降 —— **纯逻辑**（刻意**不是** <c>MonoBehaviour</c>：
     /// 无 Unity 生命周期依赖 ⇒ 可离线断言、可被任意持有者驱动）。
     ///
-    /// <para><b>出处</b>：能力下沉（E-core-18）。搬自 <c>clover-project-cs16</c> 的
+    /// <para><b>出处</b>：能力下沉。搬自 <c>clover-project-cs16</c> 的
     /// <c>client/Assets/Scripts/Module/CameraRig/ViewBob.cs</c>（**原** 77 行，<b>零业务类型引用</b>；
     /// 下沉后该项目**已删除该文件**并改用本件）—— 只把当时写死的 7 个常量换成
     /// <see cref="ViewBobConfig"/>；**逐字搬移、一个分支都没改**

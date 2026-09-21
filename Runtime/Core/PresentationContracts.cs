@@ -333,7 +333,7 @@ namespace CloverEngine
         /// <param name="clipName">音频资源名称</param>
         void PlayVoice(string clipName);
 
-        // ─────────────── 播放闸门（E-core-17：单帧上限 / 同 clip 并发上限） ───────────────
+        // ─────────────── 播放闸门（单帧上限 / 同 clip 并发上限） ───────────────
         //
         // 为什么在契约上：实现类 `SoundManager` 是 internal（G1），业务只拿得到 `Game.Sound`
         // （本接口）—— 只挂在实现类上等于"业务配不了"，闸门就永远是默认值（= 没闸门）。

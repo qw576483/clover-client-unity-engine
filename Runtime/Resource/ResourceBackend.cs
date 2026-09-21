@@ -243,7 +243,7 @@ namespace CloverEngine
                 return null;
             }
 
-            // ★ E-res-01（实测修复）：若该资源在本帧已经被同步 Resources.Load 取过，
+            // ★ 实测修复：若该资源在本帧已经被同步 Resources.Load 取过，
             //   Resources.LoadAsync 会「立刻完成」，此时 completed 事件**不会再触发**
             //   ⇒ 上游 ResourceManager 的 pending 会永远卡在 _inflight，该路径此后一直加载不出来
             //   （表现为：一次进图先取了占位/同步资源，之后异步加载再也不回调 —— 画面永远是占位色块）。

@@ -2,7 +2,7 @@
 // CloverEngine · Runtime/Data/CloverTable.cs
 // 打表产物（tsv）加载器：读 clover 打表工具产出的 tsv + 按主键强类型取行 —— 通用横切能力，下沉到引擎。
 //
-// 为什么要有它（[`clover-ai-skill/patterns/table.md`](https://github.com/qw576483/clover-tools/blob/main/ai-skill/patterns/table.md)「代码侧怎么读」）：
+// 为什么要有它（[`clover-ai-skill/patterns/table.md`](https://github.com/qw576483/clover-ai-skill/blob/main/patterns/table.md)「代码侧怎么读」）：
 //   打表工具的产物是「**tsv 数据** + **强类型行类**」，而引擎既有的数据域入口
 //   `CloverData.InitDataTable(dir)` / `IDataTable.Load<T>` 要求行类实现 `IDataRow`
 //   （`Runtime/Core/Contracts.cs`，`int Id { get; }`）——打表生成的行类是**普通字段容器**

@@ -2,11 +2,13 @@
 
 Clover 的 **Unity C# 客户端引擎**，以 UPM 包形式分发（包名 `com.clover.unity-engine`）。
 
-> **从没用过 Clover？** 照着 [新手指南：用 AI 从零做一个 Clover 游戏](https://github.com/qw576483/clover-doc#beginner-guide) 走一遍即可 —— 从装 Unity 6 到让 AI 开出第一个工程，全程不用自己写代码。
-
 与服务端 [clover-server-engine](https://github.com/qw576483/clover-server-engine) 配套：两端只在**两处**对齐 ——
 ① API 语义（`OnMsg` / `On` / `Timer.After|Every` / `Fsm.Trigger` 的拼写与语义）；
 ② 网络协议（帧格式、EMsg 消息号、ObjectID 位布局逐字节一致）。除此之外客户端按自己的能力域组织，不镜像服务端目录。
+
+## 从没用过 Clover？
+
+照着 **[新手指南：用 AI 从零做一个 Clover 游戏](https://github.com/qw576483/clover-doc/blob/main/ai/ai-quick-start.md)** 走一遍即可 —— 从装 Unity 6 到让 AI 开出第一个工程，全程不用自己写代码。
 
 ## 环境要求
 

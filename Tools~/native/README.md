@@ -7,7 +7,7 @@
 
 服务端 QUIC 已就绪（[`clover-server-engine/internal/transport/net/quic`](https://github.com/qw576483/clover-server-engine/tree/main/internal/transport/net/quic)，ALPN `clover-quic`，
 流上 `[4B 大端 len][客户端帧]`，不可靠走 Datagram）。客户端缺的只是**原生 QUIC 栈**：
-Unity 的 .NET Standard 2.1 档案没有 `System.Net.Quic`（实测 Unity 6000.6 的
+Unity 的 .NET Standard 2.1 档案没有 `System.Net.Quic`（Unity 6000.6 的
 `NetStandard/ref/2.1.0`、`Managed`、`MonoBleedingEdge` 三处均无该程序集）。
 
 选择 **msquic** 的理由是**一套 C# 绑定五端复用**：msquic 是同一套 C API，
@@ -93,7 +93,7 @@ quictls 子模块交叉编译成静态库），但它假设宿主是 Linux/macOS
    Locale::Maketext::Simple`）。脚本从 MSYS2 官方仓库取一份完整模块树（7 MB）放进构建区，
    用垫片注入。⚠️ **不要注入 `usr/lib/perl5/core_perl`**（架构相关、含 `Config.pm`，
    版本不匹配会直接报 `Perl lib version ... doesn't match`）。
-3. **不能靠 `PERL5LIB` 传路径**：环境变量在 `msys → 原生 make.exe` 这一跳会被改写（实测连冒号都丢）。
+3. **不能靠 `PERL5LIB` 传路径**：环境变量在 `msys → 原生 make.exe` 这一跳会被改写（连冒号都丢）。
    改用 **perl 垫片**（自己设 `PERL5LIB` 后 `exec` 真 perl —— 垫片→perl 是 msys 内部跳转、不改写）
    **+ `PERL5OPT` 兜底**：因为 OpenSSL 生成的 Makefile 里**硬编码了 `PERL=/usr/bin/perl`**，绕过 PATH。
 4. **quictls 的 NDK 路径识别要打补丁**（`patch-quictls-android-ndk.py`）：`$ANDROID_NDK_ROOT`
@@ -108,7 +108,7 @@ quictls 子模块交叉编译成静态库），但它假设宿主是 Linux/macOS
    （客户端与网关都不用），故给一个「永远找不到」的替身，不为此抬高整包最低 API。
 7. **遇到"头文件内容不对"就先 `CLEAN=1`**：OpenSSL 生成头文件的规则是 `$(PERL) ... > $@`，
    **重定向会先截断目标文件**；那次 perl 一旦失败就留下 0 字节头文件，而 make 只看时间戳、不再重做
-   → 后续编译报一堆无关错误（实测 `unknown type name 'CRYPTO_RWLOCK'`）。
+   → 后续编译报一堆无关错误（`unknown type name 'CRYPTO_RWLOCK'`）。
 
 ### iOS（必须 mac + Xcode，Windows 上没有合法途径拿到 iOS SDK）
 

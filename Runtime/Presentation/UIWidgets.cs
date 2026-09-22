@@ -20,7 +20,7 @@ namespace CloverEngine
     /// <para>
     /// <b>对业务公开</b>：业务"用代码搭 UI"时一律用这里，不要自己再写一套
     /// 锚点/铺满/文字的工具类 —— 那类重复实现正是踩坑高发区
-    /// （实测业务自建的 `UIBuilder` 就栽在"面板根节点没铺满"上，而本类的
+    /// （业务自建的 `UIBuilder` 就栽在"面板根节点没铺满"上，而本类的
     /// <see cref="Stretch"/> 正好能防住它）。
     /// </para>
     /// <para>
@@ -997,7 +997,7 @@ namespace CloverEngine
     /// 而这四件事**每个项目都会重踩**，且失败都是"看着不对、却不报错"：
     /// <list type="number">
     ///   <item>Quad 上的 <see cref="Collider"/> 必须删掉 —— 否则相机的 SphereCast 会打到血条，
-    ///     镜头莫名其妙被拉近（实测踩过）；</item>
+    ///     镜头莫名其妙被拉近；</item>
     ///   <item>广告牌必须**每帧**写世界朝向 —— 血条是实体根的子物体，根会随角色转身，
     ///     只在创建时设一次朝向会随角色一起转；</item>
     ///   <item>血量必须能带上**上限**（<see cref="SetHp"/>）：只喂当前血量时，60 血的目标会被按
@@ -1191,7 +1191,7 @@ namespace CloverEngine
         }
 
         // 静态共享的 Shader 与材质：Shader.Find 是慢操作、材质直接 new 会逐条累积
-        //（实测每帧新建材质会打断合批）。全部血条复用同一批材质，随比例换引用、不改本体。
+        //（每帧新建材质会打断合批）。全部血条复用同一批材质，随比例换引用、不改本体。
         private static Shader _sharedShader;
         private static bool _shaderResolved;
         private static readonly Dictionary<Color, Material> SharedMats = new();

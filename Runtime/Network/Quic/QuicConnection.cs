@@ -126,7 +126,7 @@ namespace CloverEngine
         // ⚠️ 这两个委托**必须指向静态方法**（见 OnConnectionEventStatic / OnStreamEventStatic）：
         //   实例方法委托交给原生在 Mono 下能用，在 IL2CPP 下会抛
         //   "IL2CPP does not support marshaling delegates that point to instance methods to native code"
-        //   ⇒ QUIC 在真机/发布包里永远连不上（实测 IL2CPP 包如此，且只在运行到连接时才暴露）。
+        //   ⇒ QUIC 在真机/发布包里永远连不上（IL2CPP 包如此，且只在运行到连接时才暴露）。
         private MsQuicNative.ConnectionCallback _connectionCallback;
         private MsQuicNative.StreamCallback _streamCallback;
 
@@ -494,7 +494,7 @@ namespace CloverEngine
                         //
                         // 代价不是立刻报错，而是**之后关闭连接时原生断言崩溃**：
                         // `Faulting module: msquic.dll`，异常码 0xC0000420（STATUS_ASSERTION_FAILURE），
-                        // 在 Unity 里表现为"编辑器直接消失"（实测崩了 3 次）。
+                        // 在 Unity 里表现为"编辑器直接消失"（崩了 3 次）。
                         // 这也解释了为什么"只连不发的用例永远不崩"——它根本没收到过流数据。
                         //
                         // 真踩过的排查路径（保留给后人）：控制台试验台逐步二分 ⇒ 崩点随"是否收到过数据"变化
@@ -632,7 +632,7 @@ namespace CloverEngine
                     return false;
 
                 // 数据与缓冲描述符都放**原生堆**：msquic 异步发送，直到 SEND_COMPLETE 才会读它们。
-                // 把描述符放在托管栈上会读到垃圾（实测症状：服务端日志 `quic read: frame too large: 1351873247`）。
+                // 把描述符放在托管栈上会读到垃圾（症状：服务端日志 `quic read: frame too large: 1351873247`）。
                 var ctx = AllocSendContext(encodedFrame, out var descPtr);
                 var send = _api.Fn<MsQuicNative.StreamSendFn>(_api.StreamSend);
                 var status = send(_stream, descPtr, 1, 0, ctx);

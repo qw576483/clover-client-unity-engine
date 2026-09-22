@@ -186,7 +186,7 @@ namespace CloverEngine
         /// 把矩形固定为"以父节点**底部**为原点"的定位方式（<paramref name="pos"/>.y 为**正** = 向上）。
         ///
         /// <para>用途：署名 / 版权这类"必须贴在底部"的元素。**不要**用 <see cref="AnchoredTopLeft"/> + 一个大负 y
-        /// 去放底部元素 —— CanvasScaler 是 <c>match=0.5</c>，真实画布高度随窗口变化（实测 1600x900 时只有约 972），
+        /// 去放底部元素 —— CanvasScaler 是 <c>match=0.5</c>，真实画布高度随窗口变化（1600x900 时只有约 972），
         /// y 一超过画布高度就**整体掉到屏幕外**（元素 active、文本正确，但一个像素都看不见）。</para>
         /// </summary>
         /// <param name="anchor">决定贴左 / 居中 / 贴右（用 <see cref="TextAnchor"/> 的 Lower* 三种）。</param>
@@ -308,7 +308,7 @@ namespace CloverEngine
         /// textComponent / placeholder / 光标 / 选区那一套内部连线较多，重写一遍风险大于收益；
         /// 建好之后只用公开属性改配色与字号。</para>
         ///
-        /// <para>⛔ <b>本方法存在的直接原因（实测坑）</b>：uGUI 里 <c>InputField.placeholder</c> 的
+        /// <para>⛔ <b>本方法存在的直接原因</b>：uGUI 里 <c>InputField.placeholder</c> 的
         /// 声明类型是 <c>Graphic</c>（包源码 <c>.../Runtime/UGUI/UI/Core/InputField.cs</c> 的
         /// <c>public Graphic placeholder</c>），对它直接取 <c>.font</c> / <c>.fontSize</c> / <c>.text</c>
         /// 会报 <b>CS1061</b>。唯一正确写法是先 <c>as Text</c> 再取（下面的 placeholder 段）。

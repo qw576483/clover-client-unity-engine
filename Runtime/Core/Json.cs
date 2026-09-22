@@ -49,7 +49,7 @@ namespace CloverEngine
         /// 将对象树序列化为 JSON 文本。
         /// 支持 Dictionary&lt;string, object&gt; / List / string / bool / 数值 / null / 枚举 / 时间；
         /// float/double 非有限值输出 null（对齐 JSON 规范）。
-        /// <para>本轮加固（对齐 Parse 侧的 <see cref="MaxDepth"/>）：</para>
+        /// <para>加固（对齐 Parse 侧的 <see cref="MaxDepth"/>）：</para>
         /// <list type="bullet">
         /// <item><b>循环引用 + 深度保护</b>：递归时携带「当前路径」的引用集合，自引用对象直接报
         /// <see cref="FormatException"/>，深度超过 <see cref="MaxDepth"/> 同样报错 ——

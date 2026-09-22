@@ -50,7 +50,7 @@ namespace CloverEngine
         /// 为什么必须有它：<c>Tick</c> 是靠引擎每帧传进来的 <c>dt</c> 推进的，而 <c>dt</c> 来自
         /// <c>Time.deltaTime</c> —— <b>一旦 <c>Time.timeScale = 0</c>（暂停菜单 / 结算屏 / GameOver），
         /// <c>dt</c> 恒为 0，任何定时器都永远不再触发</b>。
-        /// 实测踩过：GameOver 屏上"停 4 秒后回标题"用的是普通 <c>After</c>，
+        /// GameOver 屏上"停 4 秒后回标题"用的是普通 <c>After</c>，
         /// 结果那张屏<b>永久卡死</b>（复现：一个"1 秒"定时器等了 62 秒，
         /// 直到 <c>timeScale</c> 被恢复才补执行）。
         /// </para>
@@ -228,7 +228,7 @@ namespace CloverEngine
         public void Stop(long id)
         {
             // 0 / 负数 = 「无效 / 未持有」哨兵，绝不能进墓碑集合。
-            // 实测（2026-09-19）：SceneModule 用 0 初始化 _progressTimerId 且无条件 Stop(它)，
+            // SceneModule 用 0 初始化 _progressTimerId 且无条件 Stop(它)，
             // 而旧实现 id 从 0 起发 ⇒ Stop(0) 把 0 写进墓碑，紧接着新建的进度轮询 timer 正好拿到 id 0
             // ⇒ 它在第一次 Tick 就被墓碑移除、一次都没轮询 ⇒ progress 停在 0.9、allowSceneActivation
             // 永不置 true ⇒ 场景永不激活 ⇒ 全新 Play 会话第一次 Game.Scene.Load 必死（表现为黑屏）。

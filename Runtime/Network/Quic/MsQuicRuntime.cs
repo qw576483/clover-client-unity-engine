@@ -143,7 +143,7 @@ namespace CloverEngine
         //
         // 为什么必须有：msquic 的回调是**原生函数指针 → 托管委托**。Unity 在退出 Play 模式 /
         // 重编译时会**卸载脚本域**，此时若还有连接没关干净，msquic 的工作线程会回调到已卸载的
-        // 托管代码 —— 结果是**进程级崩溃**（实测：Windows 事件日志里
+        // 托管代码 —— 结果是**进程级崩溃**（Windows 事件日志里
         // `Faulting module name: msquic.dll`，异常码 0xc0000420 = STATUS_ASSERTION_FAILURE，编辑器直接消失）。
         // 因此：① 每个连接登记在册；② 域卸载/退出前把它们**同步**关干净（msquic 保证 ConnectionClose
         // 之后不再回调）；③ 测试的 TearDown 也必须走这条路（断言失败时后面的清理代码根本不会执行）。

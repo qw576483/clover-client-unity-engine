@@ -52,7 +52,7 @@ namespace CloverEngine
     /// <summary>
     /// 设置管理的内部实现，基于 JSON 文件持久化键值对配置。
     ///
-    /// <para><b>持久化语义（本轮加固）</b>：</para>
+    /// <para><b>持久化语义（加固）</b>：</para>
     /// <list type="bullet">
     /// <item>写盘走「先写 <c>settings.json.tmp</c> → <see cref="File.Replace"/> 原子替换」，
     /// 写一半崩溃/抛异常都不会截断或破坏既有 settings.json（旧实现 <c>File.WriteAllText</c> 直写目标文件，

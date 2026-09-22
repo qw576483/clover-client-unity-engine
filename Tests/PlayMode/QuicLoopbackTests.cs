@@ -15,7 +15,7 @@ namespace CloverEngine.Tests
     /// 原因不是"懒得测"，而是这条用例会**真的驱动 msquic 原生栈**：
     /// 一旦它失败（比如网关没开 QUIC），若清理不彻底，活连接会在退出 Play / 域卸载时让
     /// msquic 回调打到已卸载的托管代码 —— 表现是**编辑器进程直接消失**
-    /// （实测：Windows 事件日志 `Faulting module: msquic.dll`，异常码 0xc0000420 = STATUS_ASSERTION_FAILURE）。
+    /// （Windows 事件日志 `Faulting module: msquic.dll`，异常码 0xc0000420 = STATUS_ASSERTION_FAILURE）。
     /// 所以：① 默认跳过；② <see cref="TearDownQuic"/> 里**无论如何**强制关闭（断言失败时方法体内的清理不会执行）；
     /// ③ 原生层另有一道"域卸载前全关"的兜底（见 <see cref="MsQuicRuntime.ShutdownAllConnections"/>）。
     /// </para>
@@ -109,7 +109,7 @@ namespace CloverEngine.Tests
             // ★ 只求值一次、用它做断言，**绝不能在 Assert 里再求值一次**：
             //   这里的条件常有副作用（例如 `TryTakePacket` 会**出队**），
             //   循环里那次成功后包已被取走，断言里再求值就变 false ⇒ 明明成功却报"等待超时"。
-            //   （实测浪费：一次真链路用例就是这样被判失败的，而引擎日志显示回包早已收到 `recv frame len=50`。）
+            //   （浪费：一次真链路用例就是这样被判失败的，而引擎日志显示回包早已收到 `recv frame len=50`。）
             var ok = condition();
             while (!ok && Time.realtimeSinceStartup < deadline)
             {

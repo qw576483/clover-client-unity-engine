@@ -7,7 +7,7 @@ namespace CloverEngine
     /// msquic 原生互操作层（**只做 P/Invoke 与结构体映射，不含任何业务逻辑**）。
     ///
     /// 存在理由：Unity 的 .NET Standard 2.1 档案不含 <c>System.Net.Quic</c>
-    /// （实测 Unity 6000.6 的 NetStandard/ref/2.1.0、Managed、MonoBleedingEdge 三处均无该程序集），
+    /// （Unity 6000.6 的 NetStandard/ref/2.1.0、Managed、MonoBleedingEdge 三处均无该程序集），
     /// 服务端 QUIC 又已就绪，客户端只能原生接入。选 msquic 是因为**一套 C 绑定五端复用**
     /// （Windows / Linux / macOS / iOS / Android 同一套 API），见 <c>Tools~/native/README.md</c>。
     ///

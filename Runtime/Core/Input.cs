@@ -100,6 +100,27 @@ namespace CloverEngine
         /// </summary>
         bool HasTouch { get; }
 
+        /// <summary>
+        /// 指针此刻是否压在 UI 上（这次指针事件会被 uGUI 吃掉 ⇒ 业务不该再把它当成"点世界"）。
+        /// <para>
+        /// 【为什么归引擎】uGUI 的命中判定（<c>EventSystem.IsPointerOverGameObject()</c>）只有 uGUI
+        /// 程序集里那一份实现才算权威；业务各自反射补一份会出现"两份口径、各自降级"，且反射拿不到
+        /// 类型时**静默恒 false**（离线宿主里连告警都没有）。下沉到引擎后口径唯一、降级可解释。
+        /// 实现在 <c>Runtime/Presentation/Input.cs</c> 的 <c>InputInfrastructure.PointerOverUi</c>。
+        /// </para>
+        /// <para>
+        /// <b>永不抛异常</b>：无 uGUI / 场景里还没有 <c>EventSystem</c>（引擎
+        /// <see cref="EnsureEventSystem"/> 之前）/ 判定调用本身失败 ⇒ 一律 <c>false</c>
+        /// （= "指针不在 UI 上"，业务照旧走世界读数），不同分支各有留痕。
+        /// </para>
+        /// <para>
+        /// <b>不参与输入锁</b>：本属性回答的是"UI 是否吃掉指针"这一**状态事实**，不是输入读取
+        /// （对比 <see cref="HasTouch"/>：那是读设备，故受 <see cref="Lock"/> 约束）。
+        /// 加锁门控会改变既有调用方的取值，故不做。
+        /// </para>
+        /// </summary>
+        bool PointerOverUi { get; }
+
         /// <summary>锁定输入（过场动画、结算弹窗等场景使用）。</summary>
         void Lock();
 

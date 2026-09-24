@@ -94,11 +94,29 @@ namespace CloverEngine.Editor
 
                 EditorGUILayout.Space();
 
+                // ---------------- 层过滤（多层地图）----------------
+                EditorGUILayout.LabelField("③b 层过滤（多层地图：逐层各烘一份）", EditorStyles.boldLabel);
+                _o.LayerFilterEnabled = EditorGUILayout.Toggle("启用层过滤（关=现状行为）", _o.LayerFilterEnabled);
+                using (new EditorGUI.DisabledScope(!_o.LayerFilterEnabled))
+                {
+                    _o.LayerMin = EditorGUILayout.IntSlider("参与烘焙的 Layer 下界", _o.LayerMin, 0, 31);
+                    _o.LayerMax = EditorGUILayout.IntSlider("参与烘焙的 Layer 上界", _o.LayerMax, 0, 31);
+                    _o.LayerMinY = EditorGUILayout.FloatField("高度带下界 Y（世界，米）", _o.LayerMinY);
+                    _o.LayerMaxY = EditorGUILayout.FloatField("高度带上界 Y（≤下界 = 不设上界）", _o.LayerMaxY);
+                }
+                EditorGUILayout.LabelField("", "高度带按「垂直跨度相交」判定：跨层的大墙仍算障碍，只有整层在带外的被排除",
+                    EditorStyles.miniLabel);
+
+                EditorGUILayout.Space();
+
                 // ---------------- 输出 ----------------
                 EditorGUILayout.LabelField("④ 输出位置", EditorStyles.boldLabel);
                 _o.ServerDir = EditorGUILayout.TextField("服务端目录", _o.ServerDir);
                 _o.ClientDir = EditorGUILayout.TextField("客户端目录（Resources）", _o.ClientDir);
                 _o.SpawnMarkerPrefix = EditorGUILayout.TextField("出生点标记前缀", _o.SpawnMarkerPrefix);
+                _o.MarkerRootName = EditorGUILayout.TextField("标记点根对象名（空=不导出）", _o.MarkerRootName);
+                EditorGUILayout.LabelField("", "该根对象下每个子物体的「对象名 = 标记名、世界坐标 = 点位」写进 .bytes（客户端 Game.Map.GetPoints）",
+                    EditorStyles.miniLabel);
                 EditorGUILayout.LabelField("文件名", _o.FileName);
 
                 EditorGUILayout.Space();

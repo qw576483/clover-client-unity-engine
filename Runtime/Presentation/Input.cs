@@ -697,6 +697,10 @@ namespace CloverEngine
         // 契约：锁定时"所有读取"返回默认值 —— HasTouch 也必须受锁约束。
         public bool HasTouch => !IsLocked && _backend.TouchCount > 0;
 
+        // 刻意**不**受 IsLocked 约束：它回答"UI 是否吃掉指针"这一状态事实，不是输入读取
+        // （见 IInputManager.PointerOverUi 的说明）。后端无关：uGUI 命中与旧/新输入后端都无关。
+        public bool PointerOverUi => InputInfrastructure.PointerOverUi();
+
         // 失焦 / 回前台检测（见 Tick）：失焦恢复、解锁时重置鼠标位移基准，
         // 否则回前台第一帧的位移是"失焦期间累计量"，视角 / 准星会突跳。
         private bool _wasFocused = true;
@@ -919,6 +923,41 @@ namespace CloverEngine
     {
         private const string LegacyModule = "StandaloneInputModule";
         private const string ModernModule = "InputSystemUIInputModule";
+
+        /// <summary>指针命中判定失败只报一次（非预期分支留痕，避免逐帧刷屏）。</summary>
+        private static bool _pointerOverUiFailedLogged;
+
+        /// <summary>
+        /// 指针是否压在 UI 上：<c>EventSystem.IsPointerOverGameObject()</c>（无参重载 = 鼠标左键指针，
+        /// 与 uGUI 的 <c>PointerInputModule</c> 同口径；触摸要按 fingerId 判，不在本探针范围内）。
+        ///
+        /// <para><b>降级（永不抛异常）</b>：<c>EventSystem.current == null</c>（场景里还没有 EventSystem，
+        /// 如引擎 <see cref="EnsureEventSystem"/> 之前 / 离线宿主）⇒ <c>false</c>；判定调用抛异常 ⇒
+        /// <c>false</c> + 一条 Warn（只报一次）。两种情况都是"指针不在 UI 上"的安全值。</para>
+        ///
+        /// <para>为什么不再让业务各自反射：反射拿不到 uGUI 类型时是**静默**恒 false，且口径会分叉；
+        /// 引擎 asmdef 本就硬引用 uGUI（<see cref="EnsureEventSystem"/> 用 <c>EventSystem</c> /
+        /// <c>StandaloneInputModule</c>），故这里直接用类型、不需要反射。</para>
+        /// </summary>
+        public static bool PointerOverUi()
+        {
+            var es = EventSystem.current;
+            if (es == null) return false;   // 还没有 EventSystem / 离线宿主：安全值
+            try
+            {
+                return es.IsPointerOverGameObject();
+            }
+            catch (Exception e)
+            {
+                if (!_pointerOverUiFailedLogged)
+                {
+                    _pointerOverUiFailedLogged = true;
+                    Game.Logger?.Warn("Input", $"IsPointerOverGameObject() 抛异常"
+                        + $"（{e.GetType().Name}: {e.Message}）⇒ 本局按「指针不在 UI 上」处理（只报一次）");
+                }
+                return false;
+            }
+        }
 
         // uGUI 集成模块位于 Unity.InputSystem（包内 versionDefines：装了 com.unity.ugui 时定义
         // UNITY_INPUT_SYSTEM_ENABLE_UI）。个别版本可能落在 Unity.InputSystem.ForUI，故两个都试。

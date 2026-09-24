@@ -163,6 +163,16 @@ namespace CloverEngine
         }
 
         /// <inheritdoc/>
+        public void OffLevelChanged(Action<QualityTier> handler)
+        {
+            // 空操作语义（与契约一致）：未订阅过的 handler / null 都直接返回，不抛也不报错 ——
+            // 退订比订阅更容易被写成"防御性调用"（场景卸载路径上通常先退订再判空），
+            // 在这里报错只会让调用方多包一层 try。
+            if (handler == null) return;
+            _changeHandlers.Remove(handler);
+        }
+
+        /// <inheritdoc/>
         public void OnThrottling(Action<bool> handler)
         {
             _throttleHandlers.Add(handler);

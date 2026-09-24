@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -165,6 +166,187 @@ namespace CloverEngine
         {
             var json = JsonUtility.ToJson(obj);
             return Encoding.UTF8.GetBytes(json);
+        }
+
+        // ─────────────── [Serializable] 护栏（**可选入口**，不改上面两个方法的行为） ───────────────
+        //
+        // 为什么需要它：`JsonUtility` 对"缺 [Serializable] 的类型"是**静默不报错**的 ——
+        //   · 字段全是 int/string/bool 的扁平类**不标也能解**（看着一切正常）；
+        //   · 而**数组 / List 的元素类型**（或嵌套字段类型）没标 [Serializable] 时，该字段被
+        //     **静默丢成 null** —— 一条报错都没有。
+        // 参考实现（`clr-project-cr` 的 `Def/ProtoDef.cs`）记了完整实测：登录 / 创角（扁平回包）全过，
+        //   卡池 / 房间 / 对局快照（含对象数组）全空，服务端日志还显示"下发卡池 60 张"。
+        // 现象极具误导性（"服务端没发数据" vs "客户端丢字段"分不出来），故提供一个**可选的**校验入口：
+        //   · `Deserialize` / `Serialize` 的默认行为**逐字不变**（⛔ 不许让既有调用方变严而炸掉）；
+        //   · 想拿到明确报错的调用方走 `DeserializeChecked`（失败时留 Error + `out error`，返回 null）。
+        //
+        // 判据口径 = `Type.IsSerializable`（`[Serializable]` 会把它置 true），即参考实现记的那条
+        //   "typeof(T).IsSerializable 必须为 true"。
+
+        /// <summary>`FindSerializableHoles` 的缓存（同一类型的洞不会变，只算一次）。</summary>
+        private static readonly Dictionary<Type, List<string>> SerializableHoleCache = new();
+
+        /// <summary>类型图遍历的深度上限（防自引用类型图把递归拖成深渊）。</summary>
+        private const int MaxSerializableDepth = 8;
+
+        /// <summary>空列表（= 没有洞）的共享实例，避免每次校验都新建一个 List。</summary>
+        private static readonly List<string> NoSerializableHoles = new();
+
+        /// <summary>
+        /// 找出 <paramref name="type"/> 的类型图里所有**会被 <c>JsonUtility</c> 静默丢掉**的位置
+        /// （缺 <see cref="SerializableAttribute"/> 的类 / 结构体，含数组元素类型与嵌套字段）。
+        /// <para>
+        /// 返回空列表 = 通过。返回的是**缓存实例**，⛔ 调用方不要改它（只读用）。
+        /// </para>
+        /// <para>
+        /// <b>刻意跳过</b>的类型（把"JsonUtility 本就不支持的成员"与"缺 [Serializable]"分开，避免假红）：
+        /// 基元 / <see cref="string"/> / 枚举 / <see cref="decimal"/>、<c>UnityEngine.Object</c> 派生
+        /// （Unity 按引用序列化，不需要该特性）、接口与抽象类（不是"能加而没加"，而是"加不了"）、
+        /// 委托、<see cref="Type"/> 本身。数组只走**元素类型**（rank &gt; 1 的数组 JsonUtility 不支持，
+        /// 也不在此处判）。
+        /// </para>
+        /// </summary>
+        /// <param name="type">要检查的类型（null ⇒ 返回空列表）。</param>
+        public static IReadOnlyList<string> FindSerializableHoles(Type type)
+        {
+            if (type == null) return NoSerializableHoles;
+            if (SerializableHoleCache.TryGetValue(type, out var cached)) return cached;
+
+            var holes = new List<string>();
+            var visited = new HashSet<Type>();
+            WalkSerializable(type, string.Empty, 0, holes, visited);
+
+            // 同一类型可能被多个线程首次校验：谁先算完谁写，后到的用先到的（内容一样，不必加锁）。
+            if (!SerializableHoleCache.ContainsKey(type)) SerializableHoleCache[type] = holes;
+            return SerializableHoleCache[type];
+        }
+
+        /// <summary>
+        /// 反序列化（**带 <c>[Serializable]</c> 护栏**）：类型图有洞时 **不留静默 null** ——
+        /// 把每个洞的**字段路径**打进 <paramref name="error"/> 并留一条 Error，返回 null。
+        /// <para>类型图干净时行为与 <see cref="Deserialize{T}(byte[], int, int)"/> 一致。</para>
+        /// </summary>
+        /// <param name="data">原始字节数据（UTF-8 编码的 JSON）。</param>
+        /// <param name="offset">数据起始偏移量。</param>
+        /// <param name="length">数据长度。</param>
+        /// <param name="error">失败原因；成功时为 null。</param>
+        public static T DeserializeChecked<T>(byte[] data, int offset, int length, out string error)
+            where T : class
+        {
+            if (data == null || offset < 0 || length < 0 || offset > data.Length - length)
+            {
+                error = $"DeserializeChecked<{typeof(T).Name}> 参数非法：" +
+                        $"body={(data == null ? "<null>" : data.Length.ToString())} offset={offset} length={length}";
+                Game.Logger?.Error("Serializer", error);
+                return null;
+            }
+
+            var json = Encoding.UTF8.GetString(data, offset, length);
+            return DeserializeChecked<T>(json, out error);
+        }
+
+        /// <summary>
+        /// 反序列化（**带 <c>[Serializable]</c> 护栏**），入参为 JSON 文本。见
+        /// <see cref="DeserializeChecked{T}(byte[], int, int, out string)"/>。
+        /// <para><paramref name="json"/> 为空 / 全空白：返回 null 且 <paramref name="error"/> 非空
+        /// （与 <see cref="Deserialize{T}(byte[], int, int)"/> 不同 —— 后者会把异常抛给调用方）。</para>
+        /// </summary>
+        public static T DeserializeChecked<T>(string json, out string error) where T : class
+        {
+            var holes = FindSerializableHoles(typeof(T));
+            if (holes.Count > 0)
+            {
+                error = $"{typeof(T).Name} 的类型图有 {holes.Count} 处缺 [Serializable]：" +
+                        string.Join("；", holes) +
+                        "。JsonUtility 会把这些字段/数组元素静默丢成 null（不报错），请给对应类型补 [Serializable]";
+                Game.Logger?.Error("Serializer", error);
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                error = $"DeserializeChecked<{typeof(T).Name}> 收到空 JSON";
+                Game.Logger?.Error("Serializer", error);
+                return null;
+            }
+
+            error = null;
+            return JsonUtility.FromJson<T>(json);
+        }
+
+        /// <summary>递归遍历类型图，把缺 <c>[Serializable]</c> 的位置按"字段路径"记进 <paramref name="holes"/>。</summary>
+        private static void WalkSerializable(Type type, string path, int depth, List<string> holes,
+            HashSet<Type> visited)
+        {
+            if (type == null || depth > MaxSerializableDepth) return;
+            if (IsSerializableByNature(type)) return;
+
+            // 数组：只看元素类型（`T[]` 里的 `T` 缺 [Serializable] ⇒ 整个数组被丢成 null，这正是实测那个坑）
+            if (type.IsArray)
+            {
+                if (type.GetArrayRank() == 1) WalkSerializable(type.GetElementType(), path + "[]", depth + 1, holes, visited);
+                return;
+            }
+
+            // List<T> / IList<T>：同上，元素类型才是坑
+            var element = ListElementType(type);
+            if (element != null)
+            {
+                WalkSerializable(element, path + "[i]", depth + 1, holes, visited);
+                return;
+            }
+
+            if (!type.IsSerializable)
+            {
+                // 「加不了 [Serializable]」的成员不算洞（见 FindSerializableHoles 的"刻意跳过"）
+                if (type.IsInterface || type.IsAbstract || typeof(Delegate).IsAssignableFrom(type) ||
+                    type == typeof(Type))
+                {
+                    return;
+                }
+
+                holes.Add(string.IsNullOrEmpty(path)
+                    ? $"根类型 {type.FullName}"
+                    : $"{path}（{type.FullName}）");
+                return;
+            }
+
+            if (!visited.Add(type)) return;      // 类型图有环 / 同一类型多路径 ⇒ 只展开一次
+
+            foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (field.IsStatic) continue;
+                // JsonUtility 只吃 public 字段与显式 [SerializeField] 的私有字段，其余不参与，⛔ 不该误报
+                if (!field.IsPublic && !field.IsDefined(typeof(SerializeField), true)) continue;
+
+                WalkSerializable(field.FieldType,
+                    string.IsNullOrEmpty(path) ? field.Name : path + "." + field.Name,
+                    depth + 1, holes, visited);
+            }
+        }
+
+        /// <summary>这些类型不需要 <c>[Serializable]</c>（JsonUtility 对它们另有规则）。</summary>
+        private static bool IsSerializableByNature(Type type) =>
+            type.IsPrimitive || type.IsEnum || type == typeof(string) || type == typeof(decimal) ||
+            typeof(UnityEngine.Object).IsAssignableFrom(type);
+
+        /// <summary><c>List&lt;T&gt;</c> / <c>IList&lt;T&gt;</c> 的元素类型；不是则返回 null。</summary>
+        private static Type ListElementType(Type type)
+        {
+            if (type.IsGenericType)
+            {
+                var def = type.GetGenericTypeDefinition();
+                if (def == typeof(List<>) || def == typeof(IList<>) || def == typeof(IReadOnlyList<>))
+                    return type.GetGenericArguments()[0];
+            }
+
+            foreach (var it in type.GetInterfaces())
+            {
+                if (it.IsGenericType && it.GetGenericTypeDefinition() == typeof(IList<>))
+                    return it.GetGenericArguments()[0];
+            }
+
+            return null;
         }
     }
 

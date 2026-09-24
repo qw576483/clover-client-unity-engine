@@ -8,11 +8,18 @@ namespace CloverEngine
 {
     /// <summary>
     /// 局域网寻服的 UDP 收发层：一个 socket + 一条收包线程（`CloverLan-Udp`）。
+    /// 两侧共用（⛔ 不写第二套收发）：<c>LanBrowser</c>（问，临时端口 + 窗口）与
+    /// <c>LanResponder</c>（答，固定端口 + 常驻）。
     ///
     /// <para>
     /// 职责边界（结构规则.md §五 N13）：**只做收发**，不解析、不判状态、不发事件 ——
-    /// 收到的字节原样交给回调（<c>LanBrowser.Accept</c>），窗口是否结束由本类按
-    /// <see cref="ReceiveTimeoutMs"/> 轮询自判后回调 <c>onFinished</c>。
+    /// 收到的字节与**来源端点**原样交给回调（<c>LanBrowser.Accept</c> / <c>LanResponder.HandleDatagram</c>），
+    /// 窗口是否结束由本类按 <see cref="ReceiveTimeoutMs"/> 轮询自判后回调 <c>onFinished</c>。
+    /// </para>
+    ///
+    /// <para>
+    /// <b>为什么回调必须带来源端点（不只是来源 IP）</b>：应答端要把应答**单播回查询方的端口**；
+    /// 只有 IP 就会发到 47777（对端根本没在听）⇒ 表现是"主机在跑、扫描却 0 台"。
     /// </para>
     ///
     /// <para>
@@ -55,11 +62,30 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 创建并绑定 UDP socket（绑 <c>0.0.0.0:0</c>，即临时端口：应答单播回到本端口）。
+        /// 创建并绑定 UDP socket（绑 <c>0.0.0.0:0</c>，即临时端口：应答单播回到本端口）——「问」的一侧用。
         /// 创建失败返回 null 并给出原因 —— 调用方必须据此打 Error 并收尾，**不许静默**。
         /// </summary>
         /// <param name="error">失败原因（成功为 null）</param>
         public static LanSocket TryCreate(out string error)
+        {
+            return TryCreate(0, out error);
+        }
+
+        /// <summary>
+        /// 创建并绑定 UDP socket 到指定端口（「答」的一侧用：必须监听固定端口 47777，
+        /// 否则查询根本到不了本进程）。
+        ///
+        /// <para>
+        /// ⛔ <b>刻意不设 <c>ReuseAddress</c></b>：设了它 Windows 会放行「第二个绑定同一端口」，
+        /// 于是两个应答端抢同一端口、报文随机落其中一处，而
+        /// 「端口已被占用」这条边界**再也测不出来**（表现为"有时能发现、有时发现不了"）。
+        /// 不设它，第二个绑定会直接以 <c>AddressAlreadyInUse</c> 失败 ⇒ 可如实报告（见
+        /// <see cref="ILanResponder.LastError"/>）。UDP 无 TIME_WAIT，<see cref="Stop"/> 关掉后端口立即可用。
+        /// </para>
+        /// </summary>
+        /// <param name="bindPort">监听端口（1~65535）；<c>&lt;=0</c> = 绑临时端口</param>
+        /// <param name="error">失败原因（成功为 null）</param>
+        public static LanSocket TryCreate(int bindPort, out string error)
         {
             error = null;
             Socket socket = null;
@@ -71,7 +97,7 @@ namespace CloverEngine
                     // 255.255.255.255 与 x.x.x.255 都要求它；默认值在不同运行时下不一致，显式设置。
                     EnableBroadcast = true,
                 };
-                socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+                socket.Bind(new IPEndPoint(IPAddress.Any, bindPort < 0 ? 0 : bindPort));
                 return new LanSocket(socket);
             }
             catch (Exception ex)
@@ -92,8 +118,9 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 向目标发一份报文。失败打 Warn（含目标）并返回 false ——
-        /// 单个目标发不出去不该让整轮不发（比如某网卡的子网广播地址被系统拒了）。
+        /// 向目标发一份报文（查询或应答）。失败打 Warn（含目标）并返回 false ——
+        /// 单个目标发不出去不该让整轮不发（比如某网卡的子网广播地址被系统拒了），
+        /// 应答端也不该因此丢掉收包线程。
         /// </summary>
         /// <param name="payload">报文</param>
         /// <param name="target">目标地址</param>
@@ -118,7 +145,7 @@ namespace CloverEngine
             }
             catch (Exception ex)
             {
-                Game.Logger?.Warn("Lan", $"发送查询失败（目标 {target}）：{ex.Message}");
+                Game.Logger?.Warn("Lan", $"发送报文失败（目标 {target}）：{ex.Message}");
                 return false;
             }
         }
@@ -127,10 +154,13 @@ namespace CloverEngine
         /// 启动收包线程：收 → 回调 → 继续，直到窗口耗尽、被 <see cref="Stop"/> 或连续出错过多。
         /// 无论以哪条路径结束，都会先关 socket 再回调 <paramref name="onFinished"/>（收尾只这一次）。
         /// </summary>
-        /// <param name="durationMs">扫描窗口（毫秒）</param>
-        /// <param name="onDatagram">收到一份报文（参数：字节、来源 IP）</param>
-        /// <param name="onFinished">窗口结束（含提前结束）时回调一次</param>
-        public void Start(int durationMs, Action<byte[], string> onDatagram, Action onFinished)
+        /// <param name="durationMs">
+        /// 收包窗口（毫秒）。<c>&lt;= 0</c> = **常驻**（无窗口，直到 <see cref="Stop"/>）——
+        /// 应答端用这个模式（它是长期在跑的服务，不是一轮扫描）。
+        /// </param>
+        /// <param name="onDatagram">收到一份报文（参数：字节、**来源端点**；应答端要用端点里的端口回包）</param>
+        /// <param name="onFinished">窗口结束（含提前结束）时回调一次；常驻模式不受影响，可传 null</param>
+        public void Start(int durationMs, Action<byte[], IPEndPoint> onDatagram, Action onFinished)
         {
             // 线程不需要在字段里留引用（Stop 明确不 Join，见下方注释）：用完即走的局部变量
             var thread = new Thread(() => Loop(durationMs, onDatagram, onFinished))
@@ -154,14 +184,15 @@ namespace CloverEngine
             CloseSocket();
         }
 
-        private void Loop(int durationMs, Action<byte[], string> onDatagram, Action onFinished)
+        private void Loop(int durationMs, Action<byte[], IPEndPoint> onDatagram, Action onFinished)
         {
             var watch = Stopwatch.StartNew();
             var buffer = new byte[ReceiveBufferBytes];
 
             try
             {
-                while (!_stop && watch.ElapsedMilliseconds < durationMs)
+                // durationMs <= 0 = 常驻（应答端）：只受 _stop 控制，没有窗口。
+                while (!_stop && (durationMs <= 0 || watch.ElapsedMilliseconds < durationMs))
                 {
                     EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
 
@@ -229,7 +260,8 @@ namespace CloverEngine
                     {
                         var datagram = new byte[received];
                         Buffer.BlockCopy(buffer, 0, datagram, 0, received);
-                        onDatagram?.Invoke(datagram, (remote as IPEndPoint)?.Address?.ToString());
+                        // 传**整个来源端点**（应答端要按里面的端口回包）；只传 IP 会让应答发到 47777。
+                        onDatagram?.Invoke(datagram, remote as IPEndPoint);
                     }
                     catch (Exception ex)
                     {

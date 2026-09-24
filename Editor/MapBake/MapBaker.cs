@@ -91,14 +91,14 @@ namespace CloverEngine.Editor
         /// </summary>
         public static bool Export(MapBakeOptions o, out string summary)
         {
-            if (!TryPrepare(o, out var obstacleColliders, out var spawns, out summary))
+            if (!TryPrepare(o, out var input, out summary))
                 return false;
 
-            var job = new WalkableBakeJob(obstacleColliders, o);
+            var job = new WalkableBakeJob(input.Obstacles, o);
             if (!RunBakeSynchronously(job, out summary))
                 return false;
 
-            return TryFinish(o, obstacleColliders, spawns, job.Cells, job.BlockedCount, out summary);
+            return TryFinish(o, input, job.Cells, job.BlockedCount, out summary);
         }
 
         /// <summary>
@@ -109,16 +109,16 @@ namespace CloverEngine.Editor
         /// </summary>
         public static void ExportInteractive(MapBakeOptions o, Action<bool, string> onDone)
         {
-            if (!TryPrepare(o, out var obstacleColliders, out var spawns, out var summary))
+            if (!TryPrepare(o, out var input, out var summary))
             {
                 onDone?.Invoke(false, summary);
                 return;
             }
 
-            var job = new WalkableBakeJob(obstacleColliders, o);
+            var job = new WalkableBakeJob(input.Obstacles, o);
             // 每帧预算：单行成本 ≈ MapWidth × 障碍数，按 ~20 万次相交运算/帧切块
             //（小图一帧跑完不白等；大图也不会让单帧卡到丢输入）。
-            var perRowCost = Math.Max(1L, (long)o.MapWidth * Math.Max(1, obstacleColliders.Count));
+            var perRowCost = Math.Max(1L, (long)o.MapWidth * Math.Max(1, input.Obstacles.Count));
             var rowsPerFrame = Math.Max(1, (int)Math.Min(int.MaxValue, 200_000L / perRowCost));
 
             void Pump()
@@ -140,7 +140,7 @@ namespace CloverEngine.Editor
 
                 EditorApplication.update -= Pump;
                 EditorUtility.ClearProgressBar();
-                onDone?.Invoke(TryFinish(o, obstacleColliders, spawns, job.Cells, job.BlockedCount, out var s), s);
+                onDone?.Invoke(TryFinish(o, input, job.Cells, job.BlockedCount, out var s), s);
             }
 
             EditorApplication.update += Pump;
@@ -148,13 +148,65 @@ namespace CloverEngine.Editor
         }
 
         /// <summary>
-        /// 校验参数 → 显式打开目标场景 → 收集障碍物 → 生成出生点。失败时 <paramref name="summary"/> 为原因。
+        /// 一次烘焙的**输入集合**：收集阶段的产物（障碍 / 出生点 / 标记点）与诊断计数。
+        /// 打包成一个对象是因为"收集 → 编码"两段要共用的东西变多了（层过滤计数、标记点），
+        /// 继续用 out 参数会把两个入口（同步 / 帧驱动）的签名撑爆，也容易漏传一处。
         /// </summary>
-        private static bool TryPrepare(MapBakeOptions o, out List<Bounds> obstacleColliders,
-            out Vector3[] spawns, out string summary)
+        internal sealed class BakeInput
         {
-            obstacleColliders = null;
-            spawns = null;
+            /// <summary>参与阻挡烘焙的障碍物世界 AABB（已过「地面阈值 + 层过滤」两道筛）。</summary>
+            public List<Bounds> Obstacles = new List<Bounds>();
+
+            /// <summary>出生点（服务端会做净空校验，见 <see cref="BuildSpawns"/>）。</summary>
+            public Vector3[] Spawns = Array.Empty<Vector3>();
+
+            /// <summary>命名标记点（<see cref="MapBakeOptions.MarkerRootName"/> 为空时为空数组 ⇒ 不写该段）。</summary>
+            public CloverMapMarker[] Markers = Array.Empty<CloverMapMarker>();
+
+            /// <summary>场景里参与统计的碰撞体总数（含被排除的）。</summary>
+            public int Seen;
+
+            /// <summary>按「地面阈值」排除的碰撞体数（沿用旧口径）。</summary>
+            public int SkippedAsGround;
+
+            /// <summary>层过滤排除的碰撞体数（按 Unity Layer 排除）。</summary>
+            public int FilteredByLayer;
+
+            /// <summary>层过滤排除的碰撞体数（按高度带排除）。</summary>
+            public int FilteredByHeight;
+
+            /// <summary>
+            /// 被层过滤排除的 Unity Layer（升序，去重）—— 这就是日志里要报的「被过滤掉的层数」，
+            /// ⛔ 不许静默：过滤掉了哪几层必须能从日志上看出来。
+            /// </summary>
+            public readonly SortedSet<int> FilteredLayers = new SortedSet<int>();
+
+            /// <summary>参与烘焙的碰撞体所在 Unity Layer（升序，去重）。</summary>
+            public readonly SortedSet<int> KeptLayers = new SortedSet<int>();
+
+            /// <summary>层过滤排除总数。</summary>
+            public int FilteredTotal => FilteredByLayer + FilteredByHeight;
+
+            /// <summary>层过滤的一行人类可读摘要（开关关着时为空串：没有任何过滤发生）。</summary>
+            public string FilterSummary(MapBakeOptions o)
+            {
+                if (!o.LayerFilterEnabled) return string.Empty;
+                string layers = FilteredLayers.Count == 0
+                    ? "无"
+                    : string.Join(",", FilteredLayers);
+                string upper = o.LayerMaxY > o.LayerMinY ? o.LayerMaxY.ToString("F1") : "+∞";
+                return $"层过滤(Layer[{o.LayerMin},{o.LayerMax}] Y[{o.LayerMinY:F1},{upper}]) " +
+                       $"排除={FilteredTotal}(按层={FilteredByLayer}/按高度={FilteredByHeight}) " +
+                       $"被排除的层={FilteredLayers.Count}个[{layers}] 保留的层={KeptLayers.Count}个";
+            }
+        }
+
+        /// <summary>
+        /// 校验参数 → 显式打开目标场景 → 收集障碍物 / 出生点 / 标记点。失败时 <paramref name="summary"/> 为原因。
+        /// </summary>
+        private static bool TryPrepare(MapBakeOptions o, out BakeInput input, out string summary)
+        {
+            input = null;
             summary = null;
 
             string bad = o.Validate();
@@ -179,27 +231,47 @@ namespace CloverEngine.Editor
             WarnIfUnsavedScenes(o.ScenePath);
             var scene = EditorSceneManager.OpenScene(o.ScenePath, OpenSceneMode.Single);
 
-            obstacleColliders = new List<Bounds>();
-            int seen = 0, skipped = 0;
-            CollectObstacles(scene, o, obstacleColliders, ref seen, ref skipped);
+            input = new BakeInput();
+            CollectObstacles(scene, o, input);
             int rootCount = scene.GetRootGameObjects().Length;
             Debug.Log($"{Tag} 烘焙场景 name={scene.name} path={scene.path} 根对象={rootCount} " +
-                      $"碰撞体总数={seen} 按地面排除={skipped} 计为障碍={obstacleColliders.Count}");
-            if (obstacleColliders.Count == 0)
+                      $"碰撞体总数={input.Seen} 按地面排除={input.SkippedAsGround} " +
+                      $"层过滤排除={input.FilteredTotal}（按层={input.FilteredByLayer}/按高度={input.FilteredByHeight}）" +
+                      $" 计为障碍={input.Obstacles.Count}");
+            // ★ 层过滤必须**有声音**：被排除了多少、排除了哪几层，一行写清（默认关闭时这一行是"层过滤未启用"）。
+            if (o.LayerFilterEnabled)
             {
-                // 非预期分支：没有障碍物说明场景不对（或全被当成地面排除了），导出会是"全可走空地图"。
-                Debug.LogWarning($"{Tag} 未收集到任何障碍物碰撞体：导出的地图将是一张空的可走平面，请确认场景内容");
+                Debug.Log($"{Tag} {input.FilterSummary(o)}｜被排除的层={DescribeLayers(input.FilteredLayers)}");
+            }
+            else
+            {
+                Debug.Log($"{Tag} 层过滤未启用（LayerFilterEnabled=false）= 现状行为：全部非地面碰撞体参与烘焙");
+            }
+            if (input.Obstacles.Count == 0)
+            {
+                // 非预期分支：没有障碍物说明场景不对（或全被当成地面 / 层过滤排除了），导出会是"全可走空地图"。
+                Debug.LogWarning($"{Tag} 未收集到任何障碍物碰撞体：导出的地图将是一张空的可走平面，" +
+                                 "请确认场景内容，以及「地面阈值 / 层过滤」是否把该参与的几何全筛掉了");
             }
 
-            spawns = BuildSpawns(scene, o);
+            input.Spawns = BuildSpawns(scene, o);
+            input.Markers = BuildMarkers(scene, o);
             return true;
+        }
+
+        /// <summary>把一组 Unity Layer 序号写成 <c>层号(碰撞体数)</c> 列表（诊断用；不排序外部输入由调用方保证）。</summary>
+        private static string DescribeLayers(IEnumerable<int> layers)
+        {
+            var parts = new List<string>();
+            foreach (var l in layers) parts.Add(l.ToString());
+            return parts.Count == 0 ? "无" : string.Join(",", parts);
         }
 
         /// <summary>
         /// 导出收尾：编码 → 回读自检 → 原子写盘（服务端 + 客户端各一份）。
         /// 同步与帧驱动两条路径共用。
         /// </summary>
-        private static bool TryFinish(MapBakeOptions o, List<Bounds> obstacleColliders, Vector3[] spawns,
+        private static bool TryFinish(MapBakeOptions o, BakeInput input,
             bool[] cells, int blockedCount, out string summary)
         {
             summary = null;
@@ -216,8 +288,10 @@ namespace CloverEngine.Editor
                     Width = o.MapWidth,
                     Depth = o.MapDepth,
                     Cells = cells,
-                    Colliders = obstacleColliders.ToArray(),
-                    Spawns = spawns,
+                    Colliders = input.Obstacles.ToArray(),
+                    Spawns = input.Spawns,
+                    // 标记点为**空**时编码器不写该段、也不置 FlagMarkers 位 ⇒ 产物与旧版逐字节一致。
+                    Markers = input.Markers,
                 });
             }
             catch (Exception e)
@@ -267,9 +341,14 @@ namespace CloverEngine.Editor
 
             o.Save(); // 成功的这份配置留下来，命令行与下次打开直接复用
 
+            // 摘要里必须带上「层过滤排除了多少（含被排除的层数）」与「标记点多少」：
+            // 这两样一旦静默，"烘出来的地图不对 / 按名取点全落空"就只能靠联调现场去猜。
+            string layerPart = input.FilterSummary(o);
             summary = $"{o.MapName} {o.MapWidth}x{o.MapDepth} cell={o.CellSize:F2} " +
                       $"可走={o.MapWidth * o.MapDepth - blockedCount} 阻挡={blockedCount} " +
-                      $"碰撞体={obstacleColliders.Count} 出生点={spawns.Length} 字节={bytes.Length} → {outPath}";
+                      $"碰撞体={input.Obstacles.Count} 出生点={input.Spawns.Length} 标记点={input.Markers.Length} " +
+                      (layerPart.Length > 0 ? layerPart + " " : string.Empty) +
+                      $"字节={bytes.Length} → {outPath}";
 
             Debug.Log($"{Tag} 地图已导出: {outPath}\n{Tag} 自检: {verify}\n{Tag} {summary}");
             return true;
@@ -277,21 +356,104 @@ namespace CloverEngine.Editor
 
         // ---------------------------------------------------------------- 烘焙
 
-        /// <summary>收集「高于地面阈值」的碰撞体（排除地面本身），bounds 为世界 AABB。seen/skipped 为诊断计数。</summary>
-        private static void CollectObstacles(Scene scene, MapBakeOptions o, List<Bounds> outBounds,
-                                             ref int seen, ref int skipped)
+        /// <summary>
+        /// 收集「高于地面阈值 + 通过层过滤」的碰撞体（排除地面本身），bounds 为世界 AABB。
+        /// 各类排除计数写进 <paramref name="input"/>（用于日志与摘要，⛔ 不许静默）。
+        /// <para>
+        /// ⚠️ <b>历史的绕法，以及为什么不该把它搬进引擎</b>：多层地图项目（cs16 的 de_dust2）为了绕开
+        /// "位图是单层 2D"这个限制，做法是「把真实几何（Visual MeshCollider）在烘焙前**临时整体关掉**
+        /// 并存盘，只留一层每格一个 BoxCollider 的"烘焙代理"，烘完再把碰撞体恢复」——
+        /// 这条链路要改场景、要存盘、中断就会在磁盘上留下"碰撞体全关"的场景，是**项目侧**的绕法。
+        /// 引擎该给的替代品是这里的**层过滤**：用不变量（Unity Layer / 高度带）描述"谁参与烘焙"，
+        /// 不改场景、可复现、可审计。真·逐格高度场（一份数据带多层）列 V2
+        /// （见 <see cref="CloverMapFormat.FlagHeightField"/>），V1 解码器见到该段仍**明确拒绝**。
+        /// </para>
+        /// </summary>
+        private static void CollectObstacles(Scene scene, MapBakeOptions o, BakeInput input)
         {
             foreach (var root in scene.GetRootGameObjects())
             {
                 foreach (var col in root.GetComponentsInChildren<Collider>(true))
                 {
                     if (col == null || !col.enabled) continue;
-                    seen++;
+                    input.Seen++;
+
+                    // 层过滤在**收集阶段**完成：被排除的几何根本不进障碍表，
+                    // 逐格判定的成本也跟着降（大图上这是"能不能烘得动"的差别）。
+                    int layer = col.gameObject.layer;
+                    if (!o.ShouldBakeCollider(layer, col.bounds.min.y, col.bounds.max.y))
+                    {
+                        // 分开计「层排除 / 高度排除」，是为了配错时能一眼看出是哪一半筛掉了几何。
+                        if (layer < o.LayerMin || layer > o.LayerMax) input.FilteredByLayer++;
+                        else input.FilteredByHeight++;
+                        input.FilteredLayers.Add(layer);
+                        continue;
+                    }
+                    input.KeptLayers.Add(layer);
+
                     var b = col.bounds;
-                    if (b.max.y - o.GroundTopY <= o.ObstacleMinHeight) { skipped++; continue; } // 地面 / 贴地薄板
-                    outBounds.Add(b);
+                    if (b.max.y - o.GroundTopY <= o.ObstacleMinHeight)
+                    {
+                        input.SkippedAsGround++;   // 地面 / 贴地薄板
+                        continue;
+                    }
+                    input.Obstacles.Add(b);
                 }
             }
+        }
+
+        /// <summary>
+        /// 命名标记点：<see cref="MapBakeOptions.MarkerRootName"/> 指定的**根对象**下，
+        /// 每个子物体 → 一个标记点（对象名 = 标记名，世界坐标 = 点位，Y 取**真实高度**）。
+        /// <para>
+        /// 与出生点（<see cref="BuildSpawns"/> 按前缀扫全场景）的分工不同：标记点按名字取用，
+        /// 同一个名字常有多点（一组出生点、一条路线的路点），所以用"根对象下逐个子物体"这种
+        /// 最直白的映射 —— **对象名就是契约**，名字写错在项目侧的契约校验里就能发现。
+        /// </para>
+        /// <para>
+        /// 引擎**不做**业务吸附（"落阻挡格就挪到最近可走格心"是项目规则，见 cs16 的 SnapMarkerToWalkable）；
+        /// 也不做名字白名单（引擎不知道哪些名字有意义）。留空根对象名 ⇒ 返回空数组 ⇒ 不写标记点段。
+        /// </para>
+        /// </summary>
+        private static CloverMapMarker[] BuildMarkers(Scene scene, MapBakeOptions o)
+        {
+            if (string.IsNullOrEmpty(o.MarkerRootName))
+                return Array.Empty<CloverMapMarker>();
+
+            Transform root = null;
+            foreach (var go in scene.GetRootGameObjects())
+            {
+                if (go.name == o.MarkerRootName) { root = go.transform; break; }
+            }
+            if (root == null)
+            {
+                // 非预期分支：配了根对象名却找不到 ⇒ 导出的文件**没有**标记点段，客户端按名取点全落空。
+                Debug.LogWarning($"{Tag} 配置了 MarkerRootName=\"{o.MarkerRootName}\" 但场景根对象里没有它 ⇒ " +
+                                 "本次导出**不含**标记点段（客户端按名取点会全部落空）");
+                return Array.Empty<CloverMapMarker>();
+            }
+
+            var list = new List<CloverMapMarker>();
+            int blankNames = 0;
+            foreach (var t in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (t == root) continue;
+                if (string.IsNullOrWhiteSpace(t.name)) { blankNames++; continue; }
+                // 位置取世界坐标（不是 localPosition）：标记点写在根下只是**组织方式**，
+                // 点位必须与运行时/服务端同一坐标系。
+                list.Add(new CloverMapMarker(t.name, t.position));
+            }
+
+            if (blankNames > 0)
+                Debug.LogWarning($"{Tag} 标记点根 \"{o.MarkerRootName}\" 下有 {blankNames} 个空名字对象，" +
+                                 "已跳过（空名字无法按名取点，且编码器会直接报错）");
+
+            var names = new HashSet<string>();
+            int dup = 0;
+            foreach (var m in list) if (!names.Add(m.Name)) dup++;
+            Debug.Log($"{Tag} 从 \"{o.MarkerRootName}\" 收集到标记点 {list.Count} 点 / {names.Count} 个名字" +
+                      (dup > 0 ? $"（其中同名多点 {dup} 个：同名代表一组，按名取点会按文件顺序全部返回）" : string.Empty));
+            return list.ToArray();
         }
 
         /// <summary>

@@ -164,9 +164,34 @@ namespace CloverEngine
         public static ITimer Timer { get; private set; }
 
         /// <summary>
-        /// 有限状态机，用于管理游戏流程状态的切换。
+        /// 有限状态机（**应用级单例**），用于管理游戏流程状态的切换
+        /// （Launching → Logging → MainCity → Battle…，见 <c>InitFsm</c>）；
+        /// 由 <see cref="Tick"/> 驱动，<see cref="Launch"/> 前为 <c>null</c>。
+        /// <para>业务自己的状态机（每个 Bot / 每个单位一棵）请用 <see cref="NewFsm"/>，⛔ 不要注册到这里。</para>
         /// </summary>
         public static IFsm Fsm { get; private set; }
+
+        /// <summary>
+        /// 创建一棵**独立的** <see cref="IFsm"/>（新实例，与全局单例 <see cref="Fsm"/> 无任何共享）。
+        /// <para>
+        /// <b>为什么需要它</b>：引擎只有一份全局状态机，它表达的是**应用级流程**（登录 / 主城 / 战斗）。
+        /// 业务需要"每个 Bot / 每个单位各自一棵"的局部状态机时，把状态注册到 <see cref="Fsm"/> 上会让
+        /// 多个实体共用同一个 <see cref="IFsm.Current"/> 并互相覆盖 ⇒ 结构上不成立；而在本方法出现前
+        /// 业务只能**逐字复刻** <see cref="Fsm"/> 的实现（实例：clover-project-cs16 的
+        /// <c>Module/Bot/CsBotFsm.cs</c> 整份复制了自环守卫 / 回调内再转换排队 / 连锁上限 8 / 异常隔离）。
+        /// </para>
+        /// <para>
+        /// <b>用法</b>：<c>var botFsm = Game.NewFsm(); botFsm.RegisterState(...); 然后自己按帧调 botFsm.Tick(dt);</c>
+        /// —— 与全局单例的差异只有一处：<see cref="Tick"/> **不会**驱动新实例（它只驱动 <see cref="Fsm"/>），
+        /// 谁创建谁负责 Tick。
+        /// </para>
+        /// <para>
+        /// <b>边界</b>：不依赖 <see cref="Launch"/>（未启动时也可创建，<see cref="Fsm"/> 为 <c>null</c> 不影响本方法）；
+        /// 每次调用返回**新**实例，绝不返回 <see cref="Fsm"/> 本身；新实例初始无状态（<see cref="IFsm.Current"/> 为 <c>null</c>），
+        /// 先 <see cref="IFsm.RegisterState"/> 再 <see cref="IFsm.Transition"/>（与引擎自身用法一致）。
+        /// </para>
+        /// </summary>
+        public static IFsm NewFsm() => new Fsm();
 
         /// <summary>
         /// 配置存取接口，用于持久化读写游戏设置。

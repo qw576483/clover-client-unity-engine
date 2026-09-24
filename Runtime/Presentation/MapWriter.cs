@@ -46,6 +46,12 @@ namespace CloverEngine
 
             /// <summary>出生点（服务端会做净空校验并可能挪动，见服务端 <c>mapdata/spawn.go</c>）。</summary>
             public Vector3[] Spawns;
+
+            /// <summary>
+            /// 命名标记点（出生点 / 包点 / 买枪区 / AI 路线锚点……）。**为空 / null 时不写该段、
+            /// 也不置 <see cref="CloverMapFormat.FlagMarkers"/> 位** ⇒ 产物与加这个字段之前逐字节一致。
+            /// </summary>
+            public CloverMapMarker[] Markers;
         }
 
         /// <summary>按格式布局编码为字节。参数非法时抛异常（宁可导出失败，也不要写出一份"看着正常"的坏数据）。</summary>
@@ -64,12 +70,36 @@ namespace CloverEngine
             var bits = PackCells(d.Cells);
             var colliders = d.Colliders ?? Array.Empty<Bounds>();
             var spawns = d.Spawns ?? Array.Empty<Vector3>();
+            var markers = d.Markers ?? Array.Empty<CloverMapMarker>();
+
+            // 标记点在**编码前**就校验：解码端对「空名字 / NaN 坐标」是明确报错的，写端放过的话
+            // 表现是"导出看着成功、运行时读不了（或按名取不到点）"—— 必须让错误指向**写端**。
+            // 段字节数 = 段头(u32 数量) + Σ(名字长度前缀 + 名字 + 12 字节坐标)。
+            int markersBytes = markers.Length > 0 ? 4 : 0;
+            for (int i = 0; i < markers.Length; i++)
+            {
+                var m = markers[i];
+                if (string.IsNullOrEmpty(m.Name))
+                    throw new ArgumentException($"第 {i} 个标记点名字为空（按名取点取不到）");
+                if (float.IsNaN(m.Position.x) || float.IsInfinity(m.Position.x)
+                    || float.IsNaN(m.Position.y) || float.IsInfinity(m.Position.y)
+                    || float.IsNaN(m.Position.z) || float.IsInfinity(m.Position.z))
+                    throw new ArgumentException($"第 {i} 个标记点（\"{m.Name}\"）坐标非法（NaN/Inf）：{m.Position}");
+                markersBytes += CloverMapFormat.MarkerStride + Encoding.UTF8.GetByteCount(m.Name);
+            }
+
+            // flags：**只有真的有标记点时才置 FlagMarkers** —— 不置位时的字节与旧版逐字节一致
+            //（旧产物照旧可解，也不会因为"多一个空段"被旧读端判成未知段）。
+            // 见 CloverMapFormat.FlagMarkers 的前向兼容说明与下面「段顺序」注释。
+            ushort flags = CloverMapFormat.FlagWalkable;
+            if (markers.Length > 0) flags |= CloverMapFormat.FlagMarkers;
 
             // 段长度用格式层常量（ColliderStride=24 / SpawnStride=12），不写 12*2 / 12 字面量：
             // 改格式时只改一处，避免编码长度漂移成"文件能写、读端截断"的静默失败。
             int total = CloverMapFormat.HeaderSize + name.Length + bits.Length
                         + colliders.Length * CloverMapFormat.ColliderStride
-                        + spawns.Length * CloverMapFormat.SpawnStride;
+                        + spawns.Length * CloverMapFormat.SpawnStride
+                        + markersBytes;
 
             using (var ms = new MemoryStream(total))
             using (var bw = new BinaryWriter(ms, Encoding.UTF8))
@@ -77,7 +107,7 @@ namespace CloverEngine
                 // ---- 定长头（64 字节，小端）----
                 bw.Write(new[] { (byte)'C', (byte)'L', (byte)'V', (byte)'M' });
                 bw.Write((ushort)CloverMapFormat.Version);
-                bw.Write(CloverMapFormat.FlagWalkable);
+                bw.Write(flags);
                 bw.Write(d.SceneId);
                 bw.Write(d.CellSize);
                 WriteVec3(bw, d.Origin);
@@ -99,6 +129,22 @@ namespace CloverEngine
                 foreach (var s in spawns)
                 {
                     WriteVec3(bw, s);
+                }
+
+                // ---- 命名标记点段（★ **必须最后**）----
+                // 「新字段一律追加在末尾 + 置新 flags 位」是本格式的前向兼容契约：只加不改。
+                // 若把这段插到中间，旧读端（只认识旧段）就会把后面的段整体错位解释成
+                // "文件能读、地图不对"的静默失败 —— 虽然旧端有 flags 拦截，但契约上也不允许插队。
+                if (markers.Length > 0)
+                {
+                    bw.Write((uint)markers.Length);
+                    foreach (var m in markers)
+                    {
+                        var mn = Encoding.UTF8.GetBytes(m.Name);
+                        bw.Write((uint)mn.Length);
+                        bw.Write(mn);
+                        WriteVec3(bw, m.Position);
+                    }
                 }
 
                 bw.Flush();
@@ -143,7 +189,8 @@ namespace CloverEngine
                 throw new InvalidOperationException($"导出自检失败（回读不了）：{err}");
             }
             return $"{map.Name} scene={map.SceneId} {map.Width}x{map.Depth} cell={map.CellSize:F2} " +
-                   $"可走={map.WalkableCount} 阻挡={map.BlockedCount} 碰撞体={map.ColliderCount}";
+                   $"可走={map.WalkableCount} 阻挡={map.BlockedCount} 碰撞体={map.ColliderCount} " +
+                   $"标记点={map.MarkerCount}";
         }
     }
 }

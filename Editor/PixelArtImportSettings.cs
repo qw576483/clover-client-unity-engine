@@ -42,7 +42,7 @@ namespace CloverEngine.Editor
     }
 
     /// <summary>
-    /// 一条「目录 → 轴心」规则。
+    /// 一条「目录 → 轴心（＋可选的导入模式）」规则。
     /// <para>
     /// <see cref="PathContains"/> 是**资产路径片段**（如 <c>"Art/Sprites/Units/"</c>），
     /// 会被规范成两侧带 <c>/</c> 的形式再参与匹配（见 <see cref="NormalizedKey"/>），
@@ -50,6 +50,88 @@ namespace CloverEngine.Editor
     /// </para>
     /// <para>同一条路径被多条规则命中时取 <b>最长 key</b> 那条（更具体的目录优先）。</para>
     /// </summary>
+    /// <summary>切图方式。</summary>
+    public enum PixelArtSlicingMode
+    {
+        /// <summary>不切（交给目录规则里的 `ImportMode`）。</summary>
+        None = 0,
+
+        /// <summary>按「列 × 行 × 单元格」网格切（多帧条带 / 位图字体图集都用它）。</summary>
+        Grid = 1,
+
+        /// <summary>按显式逐帧矩形切（逐帧尺寸不等的条带）。</summary>
+        ExplicitRects = 2,
+
+        /// <summary>整幅当一张图（不切）+ 可选放宽 `maxTextureSize`（超大图集）。</summary>
+        WholeTexture = 3
+    }
+
+    /// <summary>
+    /// **切图规则**：把一个 PNG 切成多张子精灵（`SpriteImportMode.Multiple`）。
+    /// <para>为什么要有它：引擎原先只做「整张图怎么导」（导入参数 / 目录规则 / 导入模式），
+    /// 「一张图切成 N 张」被明文划给了"切图工具" ⇒ 每个工程都得自己写一遍
+    /// （diablo2 的 `Assets/Editor/AssetImporter.cs` 就是这套：多帧条带 + 位图字体格子 + 九宫格边框）。
+    /// 本规则把三者做成**配置驱动的数据**，代码侧零项目专有素材名。</para>
+    /// <para>⛔ 默认**没有任何规则** ⇒ 行为与加它之前完全一致（opt-in）。</para>
+    /// </summary>
+    [Serializable]
+    public sealed class PixelArtSlicingRule
+    {
+        /// <summary>资源路径包含该子串即命中（与目录规则同一匹配口径）。</summary>
+        public string PathContains;
+
+        /// <summary>切法（见 <see cref="PixelArtSlicingMode"/>）。</summary>
+        public PixelArtSlicingMode Mode = PixelArtSlicingMode.Grid;
+
+        /// <summary>列数（<see cref="PixelArtSlicingMode.Grid"/> 用）。</summary>
+        public int Columns = 1;
+
+        /// <summary>行数（<see cref="PixelArtSlicingMode.Grid"/> 用）。</summary>
+        public int Rows = 1;
+
+        /// <summary>单元格像素宽（≤0 ⇒ 该规则判为配置错误、跳过并告警）。</summary>
+        public int CellWidth;
+
+        /// <summary>单元格像素高（≤0 ⇒ 该规则判为配置错误、跳过并告警）。</summary>
+        public int CellHeight;
+
+        /// <summary>子精灵名前缀；空 ⇒ 用 `名称_行_列`。</summary>
+        public string NamePrefix;
+
+        /// <summary>
+        /// 显式逐帧矩形（`x,y,w,h`，**原点左上、y 向下**，与 Unity `SpriteRect.rect` 同口径）；
+        /// 仅 <see cref="PixelArtSlicingMode.ExplicitRects"/> 用。
+        /// </summary>
+        public List<Rect> Rects = new List<Rect>();
+
+        /// <summary>九宫格边框 `(左, 下, 右, 上)`；非 0 ⇒ 写 `importer.spriteBorder`。</summary>
+        public Vector4 Border;
+
+        /// <summary>整幅不切时放宽 `maxTextureSize` 到该值（≤0 ⇒ 不改）。</summary>
+        public int MaxTextureSizeOverride;
+
+        /// <summary>路径是否命中本规则（空子串 ⇒ 不命中，⛔ 不许用空串匹配全部）。</summary>
+        public bool Matches(string path)
+        {
+            if (string.IsNullOrEmpty(PathContains) || string.IsNullOrEmpty(path)) return false;
+            return path.IndexOf(PathContains, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>自检：配置自相矛盾时返回原因（空 ⇒ 合格）。</summary>
+        public string Validate()
+        {
+            if (string.IsNullOrEmpty(PathContains)) return "切图规则缺 PathContains";
+            if (Mode == PixelArtSlicingMode.Grid)
+            {
+                if (Columns <= 0 || Rows <= 0) return $"切图规则 `{PathContains}`：Columns/Rows 必须 > 0";
+                if (CellWidth <= 0 || CellHeight <= 0) return $"切图规则 `{PathContains}`：Grid 模式必须给 CellWidth/CellHeight";
+            }
+            if (Mode == PixelArtSlicingMode.ExplicitRects && (Rects == null || Rects.Count == 0))
+                return $"切图规则 `{PathContains}`：ExplicitRects 模式但 Rects 为空";
+            return null;
+        }
+    }
+
     [Serializable]
     public sealed class PixelArtDirectoryRule
     {
@@ -59,6 +141,43 @@ namespace CloverEngine.Editor
 
         /// <summary>命中该目录的纹理用哪种轴心。</summary>
         public PixelArtPivot Pivot = PixelArtPivot.Center;
+
+        /// <summary>
+        /// 是否**覆盖**全局 <see cref="PixelArtImportSettings.ImportMode"/>。
+        /// <para>
+        /// 默认 <c>false</c> = 沿用全局 ⇒ **既有配置资产的行为一个字节都不变**
+        /// （Unity 反序列化时新加的 bool 字段就是 <c>false</c>，不必迁移任何数据）。
+        /// </para>
+        /// <para>
+        /// <b>为什么必须有这一项</b>：<see cref="SpriteImportMode.Single"/> 与
+        /// <see cref="SpriteImportMode.Multiple"/> 混居的工程用全局单值**不安全** ——
+        /// 参考实现（`clr-project-cr`）就是这种：逐帧单位目录是"一张 PNG 一个精灵"，
+        /// 而竞技场目录（23 PNG → 25 Sprite）与塔目录（214 PNG → 236 Sprite）是**多子精灵**。
+        /// 全局设成 Single 会把后者的切图整片改坏（多子精灵被拍平成一个）；全局设成 Multiple
+        /// 又会让逐帧单位的逐帧数据全丢。⇒ 作用域必须能**逐目录**表达。
+        /// </para>
+        /// </summary>
+        [Tooltip("勾上 = 本目录用下面的 ImportMode；不勾 = 沿用配置里的全局 ImportMode")]
+        public bool OverrideImportMode;
+
+        /// <summary>
+        /// 本目录的 Sprite 导入模式（**仅 <see cref="OverrideImportMode"/> 为 true 时生效**）。
+        /// <para>
+        /// ⚠️ 取 <see cref="SpriteImportMode.Multiple"/> 时：每张子精灵的轴心由它自己的
+        /// <c>SpriteMetaData</c> 决定，本工具的 <see cref="Pivot"/> 只写"全局默认轴心"
+        /// （与全局 ImportMode 的注释同一口径）。
+        /// </para>
+        /// </summary>
+        [Tooltip("本目录的 Sprite 导入模式（仅勾上「覆盖」时生效）。Multiple = 多子精灵/图集目录")]
+        public SpriteImportMode ImportMode = SpriteImportMode.Single;
+
+        /// <summary>
+        /// 解析本规则**实际生效**的导入模式：覆盖开关打开 ⇒ 用规则自己的，否则用全局的。
+        /// <para>后处理器只经本方法取模式 —— 覆盖逻辑只有一处，⛔ 不要在调用点多写一遍三元判断。</para>
+        /// </summary>
+        /// <param name="global">配置资产上的全局导入模式。</param>
+        public SpriteImportMode ResolveImportMode(SpriteImportMode global) =>
+            OverrideImportMode ? ImportMode : global;
 
         /// <summary>
         /// 规范化的匹配键：两侧补 <c>/</c>、反斜杠转正斜杠；空/空白返回 <c>null</c>（= 该规则无效）。
@@ -100,6 +219,25 @@ namespace CloverEngine.Editor
         /// </summary>
         public List<PixelArtDirectoryRule> Rules = new List<PixelArtDirectoryRule>();
 
+        /// <summary>
+        /// 切图规则（**可选、默认空**）：命中的 PNG 会被切成多张子精灵。
+        /// <para>⛔ 空 ⇒ 行为与加本字段之前完全一致。</para>
+        /// </summary>
+        public List<PixelArtSlicingRule> SlicingRules = new List<PixelArtSlicingRule>();
+
+        /// <summary>取第一条命中的切图规则（无 ⇒ null）。顺序 = 列表顺序，**先写先赢**。</summary>
+        public PixelArtSlicingRule MatchSlicingRule(string normalizedAssetPath)
+        {
+            if (SlicingRules == null) return null;
+            for (var i = 0; i < SlicingRules.Count; i++)
+            {
+                var r = SlicingRules[i];
+                if (r != null && r.Matches(normalizedAssetPath)) return r;
+            }
+
+            return null;
+        }
+
         // ── 纹理设置（像素画）────────────────────────────────────────────────
         /// <summary>
         /// 每单位像素数：决定"多少像素 = 1 世界单位"。
@@ -121,6 +259,12 @@ namespace CloverEngine.Editor
         /// 每张子精灵的轴心由它自己的 <c>SpriteMetaData</c> 决定，本工具的
         /// <see cref="PixelArtPivot"/> 只写"全局默认轴心"，不会逐子精灵改 —— 需要逐帧轴心时
         /// 由切图工具/图集配置负责。</para>
+        /// <para>
+        /// ⚠️ <b>这是"全局"值，不是唯一来源</b>：某条规则可用
+        /// <see cref="PixelArtDirectoryRule.OverrideImportMode"/> 覆盖它（详见那边的注释：
+        /// 单子精灵目录与多子精灵目录**混居**的工程用全局单值是不安全的）。
+        /// 生效值一律经 <see cref="PixelArtDirectoryRule.ResolveImportMode"/> 取。
+        /// </para>
         /// </summary>
         public SpriteImportMode ImportMode = SpriteImportMode.Single;
 
@@ -205,6 +349,11 @@ namespace CloverEngine.Editor
                     }
 
                     if (!seen.Add(key)) issues.Add($"规则重复：{key}");
+
+                    // 覆盖了导入模式但选了 None ⇒ 纹理会**不再是 Sprite**（"导入类型"字段也会被它盖过），
+                    // 而症状是"规则命中了、精灵却全没了"，故在动手之前就说出来。
+                    if (rule.OverrideImportMode && rule.ImportMode == SpriteImportMode.None)
+                        issues.Add($"规则 {key} 覆盖的 ImportMode = None（纹理会不是 Sprite，规则形同破坏）");
                 }
             }
 
@@ -218,7 +367,17 @@ namespace CloverEngine.Editor
         public string Describe()
         {
             var ruleCount = Rules == null ? 0 : Rules.Count;
-            return $"规则 {ruleCount} 条 / PPU={PixelsPerUnit} / Filter={Filter} / " +
+            var overrides = 0;
+            if (Rules != null)
+            {
+                foreach (var r in Rules)
+                {
+                    if (r != null && r.OverrideImportMode) overrides++;
+                }
+            }
+
+            return $"规则 {ruleCount} 条（逐目录覆盖导入模式 {overrides} 条）/ 全局 ImportMode={ImportMode} / " +
+                   $"PPU={PixelsPerUnit} / Filter={Filter} / " +
                    $"Wrap={WrapMode} / 压缩={(Uncompressed ? "关" : "开")} / mipmap={(MipmapEnabled ? "开" : "关")} / " +
                    $"alphaIsTransparency={(AlphaIsTransparency ? "开" : "关")} / maxSize={MaxTextureSize}";
         }

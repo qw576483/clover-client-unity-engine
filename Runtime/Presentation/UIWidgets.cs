@@ -585,10 +585,36 @@ namespace CloverEngine
     {
         private const float SpinDegreesPerSecond = -240f;
 
+        /// <summary>
+        /// 「不确定进度」的哨兵（<c>NaN</c>）：<see cref="Show"/> 收到它 ⇒ 不显示进度条。
+        /// <para>为什么用 NaN 而不是 -1：<see cref="IUIManager.ShowLoading(string)"/>（旧签名）与
+        /// 带进度的重载共用同一个 <see cref="Show"/>，而 <c>NaN</c> 是唯一**永远不可能是合法进度**的值
+        /// （0~1 的区间里没有它），不会被业务"传个负数当进度"之类的写法误撞。</para>
+        /// </summary>
+        internal const float Indeterminate = float.NaN;
+
+        /// <summary>进度条轨道宽（画布单位）—— 引擎默认值（与 Spinner 64 / Label 600 同来源：本件自定）。</summary>
+        private const float ProgressWidth = 560f;
+
+        /// <summary>进度条高度（画布单位）—— 引擎默认值。</summary>
+        private const float ProgressHeight = 18f;
+
+        /// <summary>进度条中心相对屏幕中心的 y（画布单位，负 = 向下）—— 引擎默认值，落在文案下方。</summary>
+        private const float ProgressY = -140f;
+
+        /// <summary>百分比文字相对屏幕中心的 y（画布单位）—— 引擎默认值，落在进度条下方。</summary>
+        private const float PercentY = -172f;
+
         private readonly RectTransform _root;
         private readonly RectTransform _spinner;
         private readonly Text _label;
+        private readonly RectTransform _progressTrack;
+        private readonly RectTransform _progressFill;
+        private readonly Text _percent;
         private int _depth;
+
+        /// <summary>当前进度；<see cref="Indeterminate"/> = 不确定（不显示进度条）。</summary>
+        private float _progress = Indeterminate;
 
         public LoadingLayer(Transform parent)
         {
@@ -614,26 +640,83 @@ namespace CloverEngine
             _label.rectTransform.sizeDelta = new Vector2(600f, 44f);
             _label.rectTransform.anchoredPosition = new Vector2(0f, -80f);
 
+            // ★ 进度条（本次新增）：**确定进度**时才显示，与上面的"转圈"并列 ——
+            //   转圈回答"没卡死"，进度条回答"还差多少"，两者不互斥（原版加载页也是转圈 + 读条同时有）。
+            var track = UIFactory.CreateCentered("ProgressTrack", safe,
+                new Vector2(ProgressWidth, ProgressHeight), new Vector2(0f, ProgressY));
+            var trackBg = UIFactory.CreatePanel("Bg", track, new Color(0.10f, 0.12f, 0.16f, 0.85f), false);
+            UIFactory.Stretch(trackBg.rectTransform);
+
+            // 填充用**锚点宽度**而不是 `Image.fillAmount`（sprite 为空时 fillAmount 会静默失效，
+            // 看着就是"进度条永不动"）—— 与 UIFactory.SetBarWidth 的注释同一口径。
+            var fill = UIFactory.CreatePanel("Fill", track, new Color(0.55f, 0.78f, 1f, 0.95f), false);
+            _progressFill = fill.rectTransform;
+            UIFactory.SetBarWidth(_progressFill, 0f);
+            _progressTrack = track;
+
+            _percent = UIFactory.CreateText("ProgressPercent", safe, string.Empty, 22,
+                TextAnchor.MiddleCenter, new Color(0.85f, 0.89f, 0.95f));
+            _percent.rectTransform.anchorMin = _percent.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            _percent.rectTransform.sizeDelta = new Vector2(240f, 30f);
+            _percent.rectTransform.anchoredPosition = new Vector2(0f, PercentY);
+
+            _progressTrack.gameObject.SetActive(false);
+            _percent.gameObject.SetActive(false);
+
             _root.gameObject.SetActive(false);
         }
 
         /// <summary>是否正在显示（引用计数 &gt; 0）。</summary>
         public bool IsVisible => _depth > 0;
 
-        /// <summary>显示一层 Loading；text 为空时沿用上一次的文案。</summary>
-        public void Show(string text)
+        /// <summary>
+        /// 显示一层 Loading。<paramref name="progress"/> 为 <see cref="Indeterminate"/>（NaN）⇒ 不确定形态
+        /// （不显示进度条）；否则按 0~1 计入并显示进度条 + 百分比。
+        /// <para>
+        /// <b>嵌套语义</b>：不确定形态**不会**抹掉已经记下的进度值（上层多套一层"转圈"不该让下层的读条消失）；
+        /// 引用计数归零（真正隐藏）时才复位成不确定 —— 否则下一次 <see cref="IUIManager.ShowLoading(string)"/>
+        /// 会带着上一轮的旧进度突然出现一条 90% 的进度条。
+        /// </para>
+        /// </summary>
+        public void Show(string text, float progress)
         {
             _depth++;
             if (!string.IsNullOrEmpty(text)) _label.text = text;
+            if (!float.IsNaN(progress))
+            {
+                // NaN 之外的值一律按"确定进度"处理并夹到 [0,1]（越界是调用方笔误，夹取比抛异常安全）。
+                _progress = Mathf.Clamp01(progress);
+            }
+            ApplyProgress();
             if (!_root.gameObject.activeSelf) _root.gameObject.SetActive(true);
         }
 
-        /// <summary>收掉一层 Loading；引用计数归零才真正隐藏。</summary>
+        /// <summary>更新进度（不改引用计数、不改文案）。<c>NaN</c> ⇒ 忽略并降频留痕（非法入参）。</summary>
+        public void SetProgress(float progress)
+        {
+            if (float.IsNaN(progress))
+            {
+                LogThrottle.WarnThrottled("UI", "loading.progress.nan",
+                    "SetLoadingProgress 收到 NaN ⇒ 忽略（进度仍是上一次的值）；" +
+                    "要显示/隐藏进度条请用 ShowLoading(text, progress01) / 引用计数配对");
+                return;
+            }
+
+            _progress = Mathf.Clamp01(progress);
+            ApplyProgress();
+        }
+
+        /// <summary>收掉一层 Loading；引用计数归零才真正隐藏（并复位进度形态）。</summary>
         public void Hide()
         {
             if (_depth == 0) return;
             _depth--;
-            if (_depth == 0) _root.gameObject.SetActive(false);
+            if (_depth == 0)
+            {
+                _root.gameObject.SetActive(false);
+                _progress = Indeterminate;    // 复位：下一次 Show 不该带着上一轮的旧进度出现
+                ApplyProgress();
+            }
         }
 
         // 说明：原 `public void Reset()`（强制把 _depth 归零并隐藏遮罩）已**删除**。
@@ -653,7 +736,26 @@ namespace CloverEngine
         public void Dispose()
         {
             _depth = 0;
+            _progress = Indeterminate;
             if (_root != null) UnityEngine.Object.Destroy(_root.gameObject);
+        }
+
+        /// <summary>
+        /// 把当前进度写到进度条与百分比文字上：不确定形态下**两个节点都隐藏**（不是画一条 0% 的条 ——
+        /// "没进度"与"进度为 0"是两件事，前者不该给玩家一个永远不动的空条）。
+        /// </summary>
+        private void ApplyProgress()
+        {
+            var determinate = _depth > 0 && !float.IsNaN(_progress);
+
+            if (_progressTrack != null && _progressTrack.gameObject.activeSelf != determinate)
+                _progressTrack.gameObject.SetActive(determinate);
+            if (_percent != null && _percent.gameObject.activeSelf != determinate)
+                _percent.gameObject.SetActive(determinate);
+            if (!determinate) return;
+
+            if (_progressFill != null) UIFactory.SetBarWidth(_progressFill, _progress);
+            if (_percent != null) _percent.text = Mathf.RoundToInt(_progress * 100f) + "%";
         }
     }
 
@@ -1268,6 +1370,33 @@ namespace CloverEngine
             bar._sortingOrder = sortingOrder;
             bar.Build(width, height);
             return bar;
+        }
+
+        /// <summary>
+        /// 创建一条头顶血条（**排序层必填**的重载）。
+        /// <para>
+        /// <b>为什么要有它</b>：另一个 <see cref="Create(Transform, float, float, float, string, int)"/> 的
+        /// <c>sortingOrder</c> 有默认值 <see cref="DefaultSortingOrder"/>（= 0，为兼容既有消费方刻意保留），
+        /// 于是"忘了传"这个失败模式**完全静默**：血条节点在、两个 Quad 的 <c>enabled</c> 也是 true，
+        /// 只是被自己的单位 / 场地底图精灵盖住 ⇒ 表现成"血条时有时无 / 一条都看不见"，且不报任何错。
+        /// 本重载把该参数提到**第 2 位且无默认值** ⇒ 漏传是**编译期**错误，而不是渲染期的静默失败。
+        /// </para>
+        /// <para>
+        /// 参数位置与旧重载不同是刻意的：<paramref name="sortingOrder"/> 是唯一**没有安全默认值**的参数，
+        /// 只有把它放到"必须给"的位置才挡得住漏传。其余参数语义逐个与旧重载一致。
+        /// </para>
+        /// <para>层级取值仍是业务的事（引擎不知道你的层级表）：一般取"大于本单位精灵层、小于特效层"。</para>
+        /// </summary>
+        /// <param name="target">宿主节点（通常是实体视图根）。</param>
+        /// <param name="sortingOrder">两个 Quad 的渲染顺序（必填）。</param>
+        /// <param name="width">宽度（米）。</param>
+        /// <param name="height">高度（米）。</param>
+        /// <param name="yOffset">离宿主节点的高度（米）。</param>
+        /// <param name="tag">日志标签（多套实体用不同标签便于排障）。</param>
+        public static WorldHpBar Create(Transform target, int sortingOrder, float width = DefaultWidth,
+            float height = DefaultHeight, float yOffset = DefaultYOffset, string tag = "HpBar")
+        {
+            return Create(target, width, height, yOffset, tag, sortingOrder);
         }
 
         /// <summary>对已存在的血条应用新的尺寸 / 标签 / 排序层（供幂等复用的 <see cref="Create"/> 分支使用）。</summary>

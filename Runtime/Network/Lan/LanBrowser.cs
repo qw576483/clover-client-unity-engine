@@ -16,7 +16,8 @@ namespace CloverEngine
     /// Scan(options)
     ///   → 算目标集合（回环 / 广播 / 各网卡子网广播 / ExtraTargets）
     ///   → 建 socket、发查询（**在主线程发**：收包线程只负责收）
-    ///   → 收包线程收应答 → Accept(datagram, fromIp) → 校验 → Dispatcher.Post 到主线程 → 入结果集
+    ///   → 收包线程收应答 → Accept(datagram, 来源 IP) → 校验 → Dispatcher.Post 到主线程 → 入结果集
+    ///     （LanSocket 的回调给的是**来源端点**；本类只用其中的 IP 做日志，端口扔掉）
     ///   → 窗口到点 / Stop / 新一轮 Scan / 平台不支持 → **收尾一次**（关 socket → State=Idle → OnScanFinished）
     /// </code>
     /// </para>
@@ -250,7 +251,9 @@ namespace CloverEngine
                 socket.Send(query, target);
 
             // 窗口由收包线程自判（不依赖 Game.Timer：可能没 Launch / 没 Tick）。
-            socket.Start(durationMs, (datagram, fromIp) => Accept(datagram, fromIp), () => PostFinish(round));
+            // Accept 的 fromIp **只用于日志**（主机地址一律取报文里的 gateway）：来源端点里的端口
+            // 是查询方自己的临时端口，对本类无意义，丢掉即可。
+            socket.Start(durationMs, (datagram, remote) => Accept(datagram, remote?.Address?.ToString()), () => PostFinish(round));
         }
 
         /// <summary>把收尾投递到主线程（带轮次守卫：过期轮次的收尾直接丢弃）。</summary>

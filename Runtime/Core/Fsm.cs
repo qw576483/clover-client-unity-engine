@@ -59,15 +59,45 @@ namespace CloverEngine
         /// <param name="handler">要移除的回调。</param>
         void OffChange(Action<string, string> handler);
         /// <summary>
+        /// 把状态机恢复到"未初始化"：清空已注册状态、触发器映射与当前状态（**不销毁实例**）。
+        /// <para>
+        /// 用于每回合 / 每次复用（对象池取回）时把上一轮的状态表与当前状态清干净，再重新
+        /// <see cref="RegisterState"/> + <see cref="Force"/>。实现契约（<see cref="Fsm.Reset"/> 逐条说明）：
+        /// 调用后 <see cref="Current"/> 必须为空；可重复调用（第二次为空操作）；
+        /// <b>不</b>触发任何 OnExit / OnEnter / <see cref="OnChange"/> 回调（重置不是一次状态转换）；
+        /// 订阅表是否保留由实现声明（<see cref="Fsm"/> 的选择是**保留**，见 <see cref="Fsm.Reset"/>）。
+        /// </para>
+        /// </summary>
+        void Reset();
+        /// <summary>
         /// 获取当前状态名称。
         /// </summary>
         string Current { get; }
     }
 
     /// <summary>
-    /// 有限状态机的内部实现，管理状态注册、转换和更新。
+    /// 有限状态机的实现，管理状态注册、转换和更新。
+    /// <para>
+    /// <b>对外可实例化</b>（经 <see cref="Game.NewFsm"/>；本类由 <c>internal</c> 提升为 <c>public</c>）——
+    /// <b>为什么业务需要一个自己的实例</b>：引擎里只有一份<b>应用级单例</b>
+    /// <see cref="Game.Fsm"/>（<c>Game.Launch</c> 时建立、<c>Game.InitFsm</c> 注册的是
+    /// 游戏流程状态 Launching/Logging/MainCity/Battle…，且 <c>Game.Tick</c> 只驱动它一份）。
+    /// 业务要用状态机描述"每个 Bot / 每个单位各自一棵"的局部流程时，若把状态注册到那一份上，
+    /// 多个实体就会<b>共用同一个 <see cref="Current"/></b>、互相覆盖（同名状态重复注册还会
+    /// 触发"存活期回调被整体替换"的告警）⇒ 结构上不成立。
+    /// 提升前跨程序集不可实例化，业务只能<b>逐字复刻</b>本类实现
+    /// （实例：clover-project-cs16 的 <c>Module/Bot/CsBotFsm.cs</c> 整份复制了本文件的
+    /// 自环守卫 / 回调内再转换排队 / 连锁上限 8 / 异常隔离）—— 那正是本类被提升为 public 的原因：
+    /// 语义只有一份实现，业务直接用 <c>Game.NewFsm()</c> 拿自己那份实例，⛔ 不再抄一遍。
+    /// </para>
+    /// <para>
+    /// 与 <see cref="Game.Fsm"/> 的关系：<b>完全独立</b> —— 新实例有自己的
+    /// <c>_states</c>/<c>_transitions</c>/<c>_changeHandlers</c>/<c>_current</c>，
+    /// 不共享任何静态态；<c>Game.Tick</c> <b>不会</b>驱动新实例，谁创建谁负责按帧调用
+    /// <see cref="Tick"/>（与 <see cref="Game.Fsm"/> 由 <c>Game.Tick</c> 驱动不同）。
+    /// </para>
     /// </summary>
-    internal class Fsm : IFsm
+    public class Fsm : IFsm
     {
         /// <summary>
         /// 一次外部转换调用允许的连锁转换上限：状态回调里再发起转换会被排队补执行，
@@ -214,6 +244,43 @@ namespace CloverEngine
                     _changeHandlers.RemoveAt(i);
                 }
             }
+        }
+
+        /// <summary>
+        /// 恢复到"未初始化"（每回合重开 / 从对象池取回复用时调用）：清空状态表、触发器表与当前状态，
+        /// 清完与"刚 new 出来"的状态机一致（<see cref="Current"/> 为 <c>null</c>、<see cref="Tick"/> 空转）。
+        /// <para>
+        /// <b>清什么</b>：<c>_states</c>（已注册状态及其存活期回调）、<c>_transitions</c>（触发器映射）、
+        /// <see cref="Current"/>、以及"转换执行中 / 待补执行目标"这组内部标记 —— 后者必须一起清：
+        /// 若在回调链执行中重置而留下 <c>_switching = true</c>，之后的转换会被误当"重入"塞进队列永不执行。
+        /// </para>
+        /// <para>
+        /// <b>不清什么</b>：<see cref="OnChange"/> 的订阅表（<c>_changeHandlers</c>）—— 订阅是"调用方与实例
+        /// 之间"的关系，不是状态机内容；静默解绑会让"重置后通知不再到达"变成无从定位的现象
+        /// （表现是"重置一次以后 OnChange 就再也不触发了"）。要解绑请显式 <see cref="OffChange"/>。
+        /// 出处：clover-project-cs16 的 <c>Module/Bot/CsBotFsm.cs</c> 的 <c>Reset()</c> 同口径
+        /// （它清 <c>_states/_transitions/_current/_switching/_hasPending/_pendingState</c>，保留订阅表）。
+        /// </para>
+        /// <para>
+        /// <b>为什么不销毁实例</b>：实例常被对象池 / 每回合复用，销毁重建会让外部持有的引用（订阅、
+        /// 字段引用）全部作废，并引入 ABA 陷阱（新实例与旧引用"看似相同实则不同"）——
+        /// 本方法刻意只做"清内容"，同一引用继续可用。
+        /// </para>
+        /// <para>
+        /// <b>边界</b>：可重复调用（第二次起为空操作）；刚 <c>new</c> 出来时调用安全；
+        /// <b>不</b>触发任何 OnExit / OnEnter / OnChange 回调（重置不是一次状态转换，⛔ 不要指望它"通知离开"）；
+        /// 不抛异常、不打日志（正常操作；非预期分支才需留痕）。重置后再 <see cref="Transition"/> 到旧状态名
+        /// 会走"状态未注册"的 Error 分支（因为状态表确实空了），这是刻意保留的可见行为。
+        /// </para>
+        /// </summary>
+        public void Reset()
+        {
+            _states.Clear();
+            _transitions.Clear();
+            _current = null;
+            _switching = false;
+            _hasPending = false;
+            _pendingState = null;
         }
 
         /// <summary>

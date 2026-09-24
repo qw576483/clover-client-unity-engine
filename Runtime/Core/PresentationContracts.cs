@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.U2D;
 
@@ -122,6 +123,32 @@ namespace CloverEngine
         /// </para>
         /// </summary>
         void ShowLoading(string text = null);
+
+        /// <summary>
+        /// 显示全屏 Loading 并带上**确定进度**（0~1）。
+        /// <para>
+        /// 与 <see cref="ShowLoading(string)"/> 是**同一层**（共用同一个引用计数）：本重载只多做一件事
+        /// —— 记住进度并显示进度条 + 百分比。要边加载边推进度请调 <see cref="SetLoadingProgress"/>
+        /// （⛔ 不要反复调本方法：那是"再叠一层"，引用计数会一直涨、Loading 再也收不掉）。
+        /// </para>
+        /// <para>
+        /// <b>为什么要有它</b>：只有"转圈 + 文案"的 Loading 显示不了真进度（例如
+        /// <see cref="ISceneManager.Load"/> 的 <c>progress</c> 回调），业务只能自建一个带 <c>SetProgress</c>
+        /// 的面板 —— 参考实现（`clr-project-cr` 的 `UI/Panels/LoadingPanel.cs`）就是这么自建出来的。
+        /// </para>
+        /// </summary>
+        /// <param name="text">文案；空 / null = 沿用上一次的文案（与 <see cref="ShowLoading(string)"/> 同口径）。</param>
+        /// <param name="progress01">进度，范围 0~1（越界会被夹到 [0,1]）。</param>
+        void ShowLoading(string text, float progress01);
+
+        /// <summary>
+        /// 更新**正在显示**的 Loading 的进度（不改变引用计数、不重设文案）。
+        /// <para>没有 Loading 在显示时调用也接受（进度先记下，之后 <see cref="ShowLoading(string, float)"/> 时生效）
+        /// —— 这样"进度回调早于 Show"或"Hide 之后又来一条过期进度"都不会抛异常。</para>
+        /// <para>不显示进度条的那一层（<see cref="ShowLoading(string)"/>）调它**不会**让进度条出现。</para>
+        /// </summary>
+        /// <param name="progress01">进度，范围 0~1（越界会被夹到 [0,1]）。</param>
+        void SetLoadingProgress(float progress01);
 
         /// <summary>收掉一层 Loading（与 <see cref="ShowLoading"/> 配对）；计数归零才真正隐藏。</summary>
         void HideLoading();
@@ -577,6 +604,24 @@ namespace CloverEngine
         /// <param name="handler">等级变更时的处理函数，参数为新的等级</param>
         void OnLevelChanged(Action<QualityTier> handler);
 
+        /// <summary>
+        /// 退订画质档位变更事件（与 <see cref="OnLevelChanged"/> 配对）。
+        /// <para>
+        /// <b>为什么必须有</b>：只有 <see cref="OnLevelChanged"/> 时订阅者**无法注销** —— 委托链只增不减，
+        /// 业务侧"只挂一次"只能自己记一个 bool 标志，而面板 / 场景重开、域重载等路径上旧订阅者仍被
+        /// 引擎持有（老实例一直收回调 = 泄漏 + 幽灵行为）。参考实现（`clr-project-cr` 的
+        /// `Module/Settings/SettingsManager.cs` 的 `_qualityHooked` 一次性钩子）正是被这个缺口逼出来的写法；
+        /// 它只防住了"重复订阅"，防不住"该退订时退不掉"。
+        /// </para>
+        /// <para>
+        /// 命名沿用引擎既有的 <c>On*</c> / <c>Off*</c> 对偶（<see cref="IRouter.OnMsg"/> /
+        /// <see cref="IRouter.OffMsg"/>）。
+        /// </para>
+        /// <para>未订阅过 / <paramref name="handler"/> 为 null ⇒ <b>空操作</b>（不抛、不报错）。</para>
+        /// </summary>
+        /// <param name="handler">要注销的处理函数（须与订阅时传的是同一个委托实例）。</param>
+        void OffLevelChanged(Action<QualityTier> handler);
+
         /// <summary>订阅性能节流状态变更事件</summary>
         /// <param name="handler">节流状态变更时的处理函数，参数为是否节流</param>
         void OnThrottling(Action<bool> handler);
@@ -591,9 +636,35 @@ namespace CloverEngine
     // 数据源就是服务端加载的**同一份字节**（格式契约见
     // clover-server-engine/pkg/domain/mmo/mapdata/README.md）。
     //
-    // ★ 边界：本接口只回答**空间事实**（这一格能不能走、地图多大）。
+    // ★ 边界：本接口只回答**空间事实**（这一格能不能走、地图多大、某个名字的标记点在哪）。
     //   「输入 → 位移 → 贴着墙滑」那套**本地预测解算不在引擎**（见 clover-client-unity-engine-index.md §3.1），
     //   业务拿这里的查询结果自己写即可。
+
+    /// <summary>
+    /// 地图里的一个**命名标记点**（名字 + 世界坐标）。
+    /// <para>
+    /// 名字由导出端（现场对象名 / 项目自己的命名约定）决定，引擎不解释它的含义 ——
+    /// 「Spawn_T」「Bombsite_A」这类语义属于业务。名字允许重复：同一名字下的多个点
+    /// （一组出生点、一条路线的路点）**按文件顺序**返回。
+    /// </para>
+    /// <para><see cref="Position"/>.y 是**真实高度**（不是地面高度）：出生点/路点可能在不同楼层。</para>
+    /// </summary>
+    public readonly struct MapPoint
+    {
+        /// <summary>标记点名字（UTF-8 往返；可以是中文等任意 UTF-8）。</summary>
+        public readonly string Name;
+
+        /// <summary>世界坐标（米）。</summary>
+        public readonly Vector3 Position;
+
+        public MapPoint(string name, Vector3 position)
+        {
+            Name = name;
+            Position = position;
+        }
+
+        public override string ToString() => $"{Name}{Position}";
+    }
 
     /// <summary>
     /// 逻辑地图接口：解码后的地图元数据 + 可行走性查询。
@@ -601,6 +672,12 @@ namespace CloverEngine
     /// **未加载时 <see cref="WalkableAt"/> 恒返回 true**（不阻挡）：地图缺失是配置/导出问题，
     /// 不该表现成"玩家被锁死在原地" —— 那会把一个可诊断的问题变成一个不可诊断的现象。
     /// 加载失败的原因见 <see cref="Status"/> 与引擎日志。
+    /// </para>
+    /// <para>
+    /// **标记点查询在未加载 / 文件没有标记段时是"空"而不是"错"**：<see cref="Points"/> 为空列表、
+    /// <see cref="GetPoints"/> 返回空列表、<see cref="TryGetPoint"/> 返回 false（都不抛异常）。
+    /// 与 <see cref="WalkableAt"/> 同一取舍：地图数据问题是**可诊断**的配置/导出问题，
+    /// 不该表现成"业务代码当场崩"，但"取不到点"必须能从 <see cref="Status"/> 与日志上看出来。
     /// </para>
     /// </summary>
     public interface IMapData
@@ -640,6 +717,27 @@ namespace CloverEngine
 
         /// <summary>碰撞体数量（客户端不解码碰撞体，只记录数量供诊断）。</summary>
         int ColliderCount { get; }
+
+        /// <summary>
+        /// 地图里的**全部**命名标记点，顺序 = 文件顺序（只读视图，调用方不许改它）。
+        /// 未加载、或文件里没有标记点段（旧产物）时返回**空列表**（不是 null）。
+        /// </summary>
+        IReadOnlyList<MapPoint> Points { get; }
+
+        /// <summary>
+        /// 按名字取该名字下**全部**标记点的世界坐标，顺序 = 文件顺序（同名多点：一组出生点、一条路线）。
+        /// 没有该名字时返回空列表（不抛异常、也不写日志刷屏 —— 名字对不对由业务断言）。
+        /// </summary>
+        /// <param name="name">标记点名字（大小写敏感，序号比较）。null / 空串返回空列表。</param>
+        IReadOnlyList<Vector3> GetPoints(string name);
+
+        /// <summary>
+        /// 按名字取**第一个**标记点的世界坐标（同名多点时的第 0 个）。
+        /// 取不到时返回 false 并把 <paramref name="position"/> 置为 <c>Vector3.zero</c>。
+        /// </summary>
+        /// <param name="name">标记点名字（大小写敏感，序号比较）。</param>
+        /// <param name="position">命中时的世界坐标；未命中时为 <c>Vector3.zero</c>。</param>
+        bool TryGetPoint(string name, out Vector3 position);
 
         /// <summary>当前状态的一行人类可读描述（未加载 / 已加载 / 数据非法）。</summary>
         string Status { get; }

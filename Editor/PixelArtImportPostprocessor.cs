@@ -23,6 +23,8 @@
 
 using System;
 using System.IO;
+using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -82,6 +84,11 @@ namespace CloverEngine.Editor
             if (importer == null) return;                       // 非预期分支，但不留噪声：非纹理不会进本钩子
 
             Apply(importer, settings, rule, path);
+
+            // ★ 切图（可选、默认无规则 ⇒ 行为与加它之前完全一致）：命中切图规则 ⇒ 覆盖上面的 ImportMode
+            //   并写逐帧矩形。顺序**必须在 Apply 之后**（Apply 会按目录规则设 `spriteImportMode`）。
+            var slicing = settings.MatchSlicingRule(path);
+            if (slicing != null) ApplySlicing(importer, slicing, path);
         }
 
         /// <summary>
@@ -92,7 +99,9 @@ namespace CloverEngine.Editor
             PixelArtDirectoryRule rule, string assetPath)
         {
             importer.textureType = settings.TextureType;
-            importer.spriteImportMode = settings.ImportMode;
+            // 导入模式**逐目录解析**：规则没勾"覆盖"就用全局值（= 加本字段之前的行为）。
+            // ⛔ 不要在这里自己写三元判断 —— 覆盖逻辑只在 ResolveImportMode 一处（见其注释）。
+            importer.spriteImportMode = rule.ResolveImportMode(settings.ImportMode);
             importer.spritePixelsPerUnit = settings.PixelsPerUnit;
             importer.filterMode = settings.Filter;
             importer.wrapMode = settings.WrapMode;
@@ -123,6 +132,8 @@ namespace CloverEngine.Editor
 
             // 只在真正改过的资产上留痕（导入是批量动作，但每条都属于"非预期的自动改写"，需要可追溯）
             Debug.Log($"[Clover][PixelArt] {assetPath} ⇒ {rule.Pivot} / PPU={settings.PixelsPerUnit} / " +
+                      $"ImportMode={importer.spriteImportMode}" +
+                      $"({(rule.OverrideImportMode ? "逐目录覆盖" : "沿用全局")}) / " +
                       $"Point / 不压缩 / 无 mipmap（规则 key={rule.NormalizedKey()}）");
         }
 
@@ -132,6 +143,128 @@ namespace CloverEngine.Editor
         /// 当前生效的配置资产；**未启用 / 未选中 / 资产已失效** 均返回 <c>null</c>
         ///（= 后处理器什么都不做 —— 这是"默认不生效"的落地口径）。
         /// </summary>
+        // ── 切图（可选规则；配置结构见 PixelArtSlicingRule）──────────────────────
+
+        /// <summary>
+        /// 按切图规则把一张图切成多张子精灵 —— **引擎只算"要切成什么样"，落地交给注册的切图器**。
+        /// <para>⚠️ **为什么是挂钩而不是引擎自己切**：真正写子精灵登记要靠官方
+        /// `UnityEditor.U2D.Sprites.ISpriteEditorDataProvider`，那个命名空间属 **U2D 包程序集**；
+        /// 引擎 Editor 程序集只引用引擎自己的程序集，加那条引用会让"没装 2D Sprite 包的工程"连带编译失败。
+        /// 旧 API `TextureImporter.spritesheet` 在 Unity 6 **已被移除**（只剩 `CS0618` 警告、写进去是空操作
+        /// ⇒ 典型的静默失效），故也不能用。⇒ 由**工程侧**（它的 editor 程序集拿得到该包）实现
+        /// <see cref="IPixelArtSlicer"/> 并注册；引擎负责规则、算矩形、以及在**没注册时明确告警**（⛔ 不静默）。</para>
+        /// <para>契约：① 配置错误 / 空结果 ⇒ 限频告警 + 跳过；② 未注册切图器 ⇒ **限频告警 + 保持原导入模式**
+        /// （⛔ 不许悄悄把 `spriteImportMode` 改成 Multiple 却不切）；③ 不抛异常。</para>
+        /// </summary>
+        private static void ApplySlicing(TextureImporter importer, PixelArtSlicingRule rule, string assetPath)
+        {
+            var bad = rule.Validate();
+            if (bad != null)
+            {
+                LogThrottle.WarnOnce("PixelArtImport", "slicing.bad:" + assetPath, "切图规则配置错误，已跳过：" + bad);
+                return;
+            }
+
+            if (rule.Border != Vector4.zero) importer.spriteBorder = rule.Border;
+            if (rule.MaxTextureSizeOverride > 0) importer.maxTextureSize = rule.MaxTextureSizeOverride;
+
+            if (rule.Mode == PixelArtSlicingMode.WholeTexture)
+            {
+                importer.spriteImportMode = SpriteImportMode.Single;
+                Debug.Log($"[Clover][PixelArt] {assetPath} ⇒ 整幅不切（maxTextureSize={importer.maxTextureSize}）");
+                return;
+            }
+
+            var items = BuildSliceItems(rule, assetPath);
+            if (items == null || items.Count == 0)
+            {
+                LogThrottle.WarnOnce("PixelArtImport", "slicing.empty:" + assetPath,
+                    "切图规则没产出任何子精灵，已跳过（保持原导入模式）：" + assetPath);
+                return;
+            }
+
+            var slicer = Slicer;
+            if (slicer == null)
+            {
+                LogThrottle.WarnOnce("PixelArtImport", "slicing.noslicer:" + assetPath,
+                    $"命中切图规则 `{rule.PathContains}` 但**本工程没有注册切图器** ⇒ 未切图（仍是整幅）。" +
+                    "工程侧实现 `CloverEngine.Editor.IPixelArtSlicer` 并调 " +
+                    "`PixelArtImportPostprocessor.RegisterSlicer(...)` 即可（见引擎索引文档）");
+                return;
+            }
+
+            var request = new PixelArtSliceRequest
+            {
+                AssetPath = assetPath,
+                Rule = rule,
+                Items = items
+            };
+
+            try
+            {
+                if (!slicer.TryApply(importer, request))
+                {
+                    LogThrottle.WarnOnce("PixelArtImport", "slicing.fail:" + assetPath,
+                        "切图器返回失败 ⇒ 未切图（保持原导入模式）：" + assetPath);
+                    return;
+                }
+            }
+            catch (Exception e)
+            {
+                LogThrottle.WarnOnce("PixelArtImport", "slicing.throw:" + assetPath,
+                    $"切图器抛异常（已捕获，导入继续）：{e.GetType().Name}: {e.Message}");
+                return;
+            }
+
+            Debug.Log($"[Clover][PixelArt] {assetPath} ⇒ 已按 {items.Count} 张子精灵切分"
+                      + $"（{rule.Mode}，key={rule.PathContains}）");
+        }
+
+        /// <summary>按规则算出「要切成哪几块」（名字 + 矩形；顺序 = 规则的遍历顺序）。</summary>
+        private static List<PixelArtSliceItem> BuildSliceItems(PixelArtSlicingRule rule, string assetPath)
+        {
+            var prefix = string.IsNullOrEmpty(rule.NamePrefix)
+                ? System.IO.Path.GetFileNameWithoutExtension(assetPath)
+                : rule.NamePrefix;
+
+            var items = new List<PixelArtSliceItem>();
+
+            if (rule.Mode == PixelArtSlicingMode.ExplicitRects)
+            {
+                var list = rule.Rects;
+                if (list == null) return items;
+
+                for (var i = 0; i < list.Count; i++)
+                    items.Add(new PixelArtSliceItem { Name = prefix + "_" + i, Rect = list[i] });
+                return items;
+            }
+
+            for (var row = 0; row < rule.Rows; row++)
+            {
+                for (var col = 0; col < rule.Columns; col++)
+                {
+                    items.Add(new PixelArtSliceItem
+                    {
+                        Name = prefix + "_" + row + "_" + col,
+                        Rect = new Rect(col * rule.CellWidth, row * rule.CellHeight, rule.CellWidth, rule.CellHeight)
+                    });
+                }
+            }
+
+            return items;
+        }
+
+        // ── 切图器注册（工程侧实现，见 IPixelArtSlicer）──────────────────────────
+
+        private static IPixelArtSlicer Slicer;
+
+        /// <summary>
+        /// 工程侧注册切图器（幂等：后注册的覆盖先注册的）。
+        /// <para>典型用法：工程 editor 程序集里的 `[InitializeOnLoadMethod]` 调一次；
+        /// ⛔ 不注册也不会静默 —— 命中切图规则时会明确告警"未注册切图器"。</para>
+        /// </summary>
+        public static void RegisterSlicer(IPixelArtSlicer slicer) => Slicer = slicer;
+
         public static PixelArtImportSettings ActiveSettings
         {
             get

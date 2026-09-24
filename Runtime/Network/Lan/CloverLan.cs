@@ -88,6 +88,34 @@ namespace CloverEngine
         }
 
         /// <summary>
+        /// 创建局域网**应答端**（"我开的主机要被别人扫到"）——<see cref="ILanBrowser"/> 的对侧。
+        ///
+        /// <para>
+        /// <b>不经 <see cref="Game"/> 门面</b>、<b>不要求 <see cref="Game.Launch"/></b>：
+        /// 「我这台是不是主机」是业务决策（进哪个模式 / 开哪张图），不是引擎生命周期的一部分；
+        /// 也不用等 <see cref="Init"/> —— 应答与扫描互不影响，早开晚开都行。
+        /// </para>
+        ///
+        /// <code>
+        /// var responder = CloverLan.CreateResponder();
+        /// var self = LanHostInfo.Create("", 8002, 8003, null, "我的服", 1, 10, "1.0.0", null); // Host 留空 = 自动取本机 IPv4
+        /// if (!responder.Start(self))
+        ///     Game.Logger.Warn("Lan", $"局域网应答端启动失败：{responder.LastError}");
+        /// // ... 主人退出时
+        /// responder.Dispose();
+        /// </code>
+        ///
+        /// <para>
+        /// ⚠️ 返回值由调用方持有并负责 <see cref="ILanResponder.Dispose"/>（引擎不代管 —— 代管就变成
+        /// 门面生命周期的一部分了）。失败不抛异常，原因见 <see cref="ILanResponder.LastError"/>。
+        /// </para>
+        /// </summary>
+        public static ILanResponder CreateResponder()
+        {
+            return new LanResponder();
+        }
+
+        /// <summary>
         /// 平台支持说明（日志 / 调试面板用）。<b>不需 Launch 即可调用</b>（只读平台能力表）。
         /// </summary>
         public static string Describe()

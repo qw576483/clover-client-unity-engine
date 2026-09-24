@@ -61,6 +61,39 @@ namespace CloverEngine.Editor
         /// <summary>可行走性取样柱体的顶面，**相对地面顶面（GroundTopY）的高度**（米）：实际世界 Y = GroundTopY + ProbeTopY。</summary>
         public float ProbeTopY = 2.2f;
 
+        // ---- 层过滤（多层地图：逐层各烘一份）----
+        //
+        // 为什么需要它：本引擎的位图是**单层 2D**（格柱 ∩ 障碍 AABB ⇒ 这一格能不能走）。
+        // 多层地图（上下两层楼板、T/CT 出生点差好几米、楼梯/高台）直接整场景烘一遍，
+        // 会把"上层楼板"整片算成阻挡 ⇒ 上下两层在**一张平面**上互相遮挡，连通性当场断掉。
+        // 引擎给的解法是「把哪一层算障碍」变成参数（而不是让项目去写"临时关碰撞体/临时改层级"的绕法）：
+        // 逐层各烘一份单层位图，一份地图数据对应一个楼层。
+        // ⚠️ 真·逐格地形高度场（一份数据带多层）列 V2，见 CloverMapFormat.FlagHeightField。
+
+        /// <summary>
+        /// 层过滤开关。<b>默认 false = 现状行为</b>：场景里所有"非地面"碰撞体都参与阻挡烘焙，
+        /// 产出与加这个开关之前**逐字节一致**（旧工程不改参数 ⇒ 结果不变）。
+        /// </summary>
+        public bool LayerFilterEnabled;
+
+        /// <summary>参与烘焙的 Unity Layer 区间**下界（含）**。仅当 <see cref="LayerFilterEnabled"/> 为 true 时生效。</summary>
+        public int LayerMin;
+
+        /// <summary>参与烘焙的 Unity Layer 区间**上界（含）**。仅当 <see cref="LayerFilterEnabled"/> 为 true 时生效。</summary>
+        public int LayerMax = 31;
+
+        /// <summary>
+        /// 参与烘焙的**高度带下界**（世界 Y，米；含）。仅当 <see cref="LayerFilterEnabled"/> 为 true 时生效。
+        /// 完全低于它的几何（典型：上一层/下一层的楼板）不参与阻挡。
+        /// </summary>
+        public float LayerMinY;
+
+        /// <summary>
+        /// 参与烘焙的**高度带上界**（世界 Y，米；含）。仅当 <see cref="LayerFilterEnabled"/> 为 true 时生效。
+        /// <b>&lt;= <see cref="LayerMinY"/> 表示不设上界</b>（即「按高度阈值取层」：只要不低于下界就算参与）。
+        /// </summary>
+        public float LayerMaxY;
+
         // ---- 输出位置 ----
         /// <summary>服务端读取的产物目录（服务端自己按路径探测该文件）。</summary>
         public string ServerDir = "Assets/MapData";
@@ -75,10 +108,53 @@ namespace CloverEngine.Editor
         /// </summary>
         public string SpawnMarkerPrefix = "Spawn";
 
+        /// <summary>
+        /// **命名标记点**的根对象名（场景里的根对象，如 cs16 的 <c>Level/Markers</c> 那个 <c>Markers</c>）：
+        /// 该根下每个子物体的**对象名 = 标记名、世界坐标 = 点位**，随同一份 .bytes 导出
+        /// （见 <c>CloverMapFormat.FlagMarkers</c>；客户端用 <c>Game.Map.GetPoints(名字)</c> 取）。
+        /// <para>
+        /// <b>留空 = 不导出标记点段（现状行为）</b>。不导出时文件里没有该段，
+        /// 客户端按名取点会全部落空（引擎会打 Warn 而不是静默）。
+        /// </para>
+        /// <para>
+        /// Y 取对象的**真实高度**（同一名字的点可以在不同楼层），引擎不做任何业务吸附 ——
+        /// "落阻挡格就吸附到最近可走格心"这类规则属于项目（与出生点 <see cref="SpawnMarkerPrefix"/> 同一分工）。
+        /// </para>
+        /// </summary>
+        public string MarkerRootName = string.Empty;
+
         /// <summary>产物文件名（<c>&lt;地图名&gt;.bytes</c>：Unity 按 <c>TextAsset</c> 导入，取其 <c>bytes</c>）。</summary>
         public string FileName => MapName + ".bytes";
 
         public MapBakeOptions Clone() => (MapBakeOptions)MemberwiseClone();
+
+        /// <summary>
+        /// 该碰撞体是否参与**阻挡**烘焙（层过滤判定）。<see cref="LayerFilterEnabled"/> 为 false 时
+        /// **恒返回 true** —— 即现状行为，产出与旧版逐字节一致。
+        /// <para>
+        /// 开关打开时的判据：Unity Layer 落在 [<see cref="LayerMin"/>, <see cref="LayerMax"/>]（闭区间），
+        /// 且碰撞体的垂直跨度 [<paramref name="minY"/>, <paramref name="maxY"/>] 与高度带
+        /// [<see cref="LayerMinY"/>, <see cref="LayerMaxY"/>] **相交**（<see cref="LayerMaxY"/> ≤
+        /// <see cref="LayerMinY"/> 视为不设上界）。
+        /// 用"相交"而不是"完全包含"：跨层的大墙 / 立柱**仍然算障碍**（它真的挡路），
+        /// 只有**完全落在带外**的楼层（典型：上层楼板）才被排除。
+        /// </para>
+        /// <para>
+        /// 刻意抽成**纯函数**（不碰场景 / 不碰 UnityEditor）：它是最容易配错、也最该被离线自检
+        /// 直接跑断言的那一段。
+        /// </para>
+        /// </summary>
+        /// <param name="layer">碰撞体所在 Unity Layer（0~31）。</param>
+        /// <param name="minY">碰撞体世界 AABB 的最小 Y（米）。</param>
+        /// <param name="maxY">碰撞体世界 AABB 的最大 Y（米）。</param>
+        public bool ShouldBakeCollider(int layer, float minY, float maxY)
+        {
+            if (!LayerFilterEnabled) return true;
+            if (layer < LayerMin || layer > LayerMax) return false;
+            if (maxY < LayerMinY) return false;                            // 整个在高度带下方
+            if (LayerMaxY > LayerMinY && minY > LayerMaxY) return false;   // 整个在高度带上方
+            return true;
+        }
 
         /// <summary>参数校验；返回 null 表示合法，否则返回一条人类可读的原因。</summary>
         public string Validate()
@@ -97,6 +173,15 @@ namespace CloverEngine.Editor
             // 不拦的话配错也能烘焙成功，产出取样柱埋在地下的"全可走"空碰撞地图。
             if (ProbeBottomY <= 0f)
                 return "取样柱底面必须严格高于地面（相对 GroundTopY 的高度须 > 0）";
+            // 层过滤只在开关打开时校验（开关关着时这些值是死值，不该让旧配置因为"默认值恰好非法"而导不出）。
+            if (LayerFilterEnabled)
+            {
+                if (LayerMin < 0 || LayerMin > LayerMax || LayerMax > 31)
+                    return $"层过滤的 Unity Layer 区间非法：[{LayerMin}, {LayerMax}]（须 0 ≤ 下界 ≤ 上界 ≤ 31）";
+                if (float.IsNaN(LayerMinY) || float.IsInfinity(LayerMinY)
+                    || float.IsNaN(LayerMaxY) || float.IsInfinity(LayerMaxY))
+                    return $"层过滤的高度带含 NaN/Inf：Y[{LayerMinY}, {LayerMaxY}]";
+            }
             if (string.IsNullOrWhiteSpace(ServerDir)) return "服务端目录为空";
             if (string.IsNullOrWhiteSpace(ClientDir)) return "客户端目录为空";
             // 客户端产物必须落 Resources 下才会被 Unity 打进包体：否则导出"成功"但运行时读不到，

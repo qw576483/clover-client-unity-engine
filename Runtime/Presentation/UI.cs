@@ -307,7 +307,20 @@ namespace CloverEngine
         /// <inheritdoc/>
         public void ShowLoading(string text = null)
         {
-            _loading.Show(text);
+            // 旧签名 = "不确定进度"（不显示进度条）⇒ 与本次改动之前**逐字一致**。
+            _loading.Show(text, LoadingLayer.Indeterminate);
+        }
+
+        /// <inheritdoc/>
+        public void ShowLoading(string text, float progress01)
+        {
+            _loading.Show(text, progress01);
+        }
+
+        /// <inheritdoc/>
+        public void SetLoadingProgress(float progress01)
+        {
+            _loading.SetProgress(progress01);
         }
 
         /// <inheritdoc/>

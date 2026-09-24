@@ -41,6 +41,7 @@
 //      —— 与项目现版"先建后改"两次赋值的**最终结果**逐字一致（顺序也必须一致，否则会被覆盖回去）。
 // ─────────────────────────────────────────────────────────────────────────────
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -427,6 +428,95 @@ namespace CloverEngine
             return new ToggleRow { Button = button, Value = value };
         }
 
+        // ═══════════════════════ 竖向滚动列表 ═══════════════════════
+        //
+        // 出处（形状与坑逐条来自参考实现，⛔ 不含任何项目专属数值）：
+        //   `clr-project-cr` 的 `UI/Panels/DeckEditPanel.cs` 的 `BuildGrid()` —— 它为了"可按住拖动的卡池"
+        //   自建了一套 `ScrollRect + RectMask2D + content + 行`；同一个交付单元此前只做过分页
+        //   （`RoomListPanel`）⇒ 同一个工程里出现了**两份取法**。本件把它收敛成引擎的一个建件。
+        //
+        // ★ 必须写进注释的四个坑（都是"看得见现象、查不到原因"的类型）：
+        //   ① **`viewport` / `content` 两个字段必须显式赋值**。`ScrollRect` 在二者任一为空时**直接 return**
+        //      （不报错、不警告）⇒ 表现是"节点都在、拖不动"，最难归因的一种。
+        //   ② **视口必须有可命中的图形**：`RectMask2D` **不是** `Graphic`，只有它时射线打不到视口本身 ——
+        //      "按在两行之间的空隙上拖动"命不中任何东西 ⇒ 拖不动（按在行上则能拖，因为事件从子节点冒泡上来）。
+        //      本件给视口默认挂一个**全透明** `Image`（`raycastTarget = true`）解决（这正是 uGUI 自带
+        //      ScrollView 的形状）；要背景色就传 `viewportColor`。
+        //   ③ **content 的高度必须自己算**（行高之和 + 间距之和）：不设时会按"行撑满父节点"解释，
+        //      滚动范围恒为 0（拖不动）或底部最后一行被永久裁掉。
+        //   ④ **`verticalNormalizedPosition`：1 = 顶部、0 = 底部**（与直觉相反）。想在切页签时"复位到顶部"
+        //      要用 1 —— 参见 <see cref="VerticalList.ScrollToTop"/>。
+        //
+        // ⛔ 引擎不含任何项目的滚动手感数值（`movementType` / `elasticity` / `decelerationRate` /
+        //    `scrollSensitivity` 一律不预设）：把 <see cref="VerticalList.Scroll"/> 暴露给调用方，
+        //    手感由项目定（参考实现自己登记了"这两个值与原版的真实手感参数无出处"）。
+        // ⛔ 也不用 `Mask`：它要求同一个节点上有 `Graphic` 且行为受 `showMaskGraphic` 影响；
+        //    `RectMask2D` 只需矩形即可裁剪，且不依赖 sprite。
+
+        /// <summary>
+        /// 创建一个**竖向滚动列表**（视口 + 列表根 + 行宿主）。
+        /// <para>
+        /// 结构：<c>name</c>（= 视口，带 <see cref="ScrollRect"/> 与可选的 <see cref="RectMask2D"/>）
+        /// → <c>{name}.Content</c>（列表根，行挂在这下面）。
+        /// 行由 <see cref="VerticalList.CreateItem"/> 造（锚点 = 顶部撑满宽、轴心 = 顶边），
+        /// 位置与 content 高度由 <see cref="VerticalList.Reflow"/> 统一算。
+        /// </para>
+        /// <para>
+        /// 定位沿用 <see cref="Place"/> 的四元组（与 <see cref="CreateInputField"/> 同风格）：
+        /// <paramref name="anchor"/> / <paramref name="pivot"/> / <paramref name="pos"/> / <paramref name="viewportSize"/>。
+        /// </para>
+        /// </summary>
+        /// <param name="name">节点名（视口名）。</param>
+        /// <param name="parent">宿主节点。</param>
+        /// <param name="anchor">视口锚点（同 <see cref="Place"/>）。</param>
+        /// <param name="pivot">视口轴心（同 <see cref="Place"/>）。</param>
+        /// <param name="pos">视口位置（相对锚点的偏移）。</param>
+        /// <param name="viewportSize">可视区尺寸（= 视口尺寸，滚动就是在这个框里发生）。</param>
+        /// <param name="itemHeight">行高（画布单位）。</param>
+        /// <param name="spacing">行间距（画布单位；可为 0）。</param>
+        /// <param name="masked">是否挂 <see cref="RectMask2D"/> 裁掉出框的行。默认 true。</param>
+        /// <param name="viewportColor">视口底色；默认全透明（只为可命中，见上文坑 ②）。</param>
+        public static VerticalList CreateVerticalList(string name, Transform parent, Vector2 anchor, Vector2 pivot,
+            Vector2 pos, Vector2 viewportSize, float itemHeight, float spacing, bool masked = true,
+            Color viewportColor = default(Color))
+        {
+            // 视口底色用 Image 而不是 CreateNode：见上文坑 ② —— 没有 Graphic 就没有可命中的图元。
+            var viewport = CreatePanel(name, parent, viewportColor, true);
+            Place(viewport.rectTransform, anchor, pivot, pos, viewportSize);
+
+            var scroll = viewport.gameObject.AddComponent<ScrollRect>();
+            if (masked)
+            {
+                // 遮罩挂在**视口自己**身上：`RectMask2D` 裁的是自己的子节点，而子节点只有 content
+                // ⇒ 效果 = 视口裁剪，不必再多套一层空节点（参考实现的做法）。
+                viewport.gameObject.AddComponent<RectMask2D>();
+            }
+
+            var content = CreateNode(name + ".Content", viewport.rectTransform);
+            // content 锚点 = 顶部**横向撑满**、轴心 = 顶边中点：宽度随视口变（行宽度也随视口变），
+            // 高度由 Reflow 显式写死。⛔ 不要给行用 Stretch（铺满）—— 那会让行对 content 高度贡献 0。
+            content.anchorMin = new Vector2(0f, 1f);
+            content.anchorMax = new Vector2(1f, 1f);
+            content.pivot = new Vector2(0.5f, 1f);
+            content.anchoredPosition = Vector2.zero;
+            content.sizeDelta = new Vector2(0f, 0f);
+
+            scroll.viewport = viewport.rectTransform;
+            scroll.content = content;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+
+            return new VerticalList
+            {
+                Root = viewport.rectTransform,
+                Viewport = viewport.rectTransform,
+                Content = content,
+                Scroll = scroll,
+                ItemHeight = itemHeight,
+                Spacing = spacing,
+            };
+        }
+
         /// <summary>
         /// 非强调按钮：按 <see cref="CreateButton"/> 建（label 居中、字号 26、色 (0.95,0.96,1)），
         /// 再按 <paramref name="style"/> 覆盖颜色与字号。
@@ -495,6 +585,162 @@ namespace CloverEngine
         public void SetText(string text)
         {
             if (Value != null) Value.text = text;
+        }
+    }
+
+    /// <summary>
+    /// **竖向滚动列表**的句柄（由 <see cref="UIFactory.CreateVerticalList"/> 产出）。
+    /// <para>
+    /// 职责边界：本类只管"列表的骨架"——视口 / 列表根 / 行的落位 / content 高度 / 滚到某一行；
+    /// **行里画什么**（图标、文案、按钮、拖拽）是调用方的事：<see cref="CreateItem"/> 返回的就是一个
+    /// 空的、已按位摆好的矩形节点，往里面挂子节点即可。
+    /// </para>
+    /// <para>
+    /// 行不做虚拟化（行数少时没必要）：<see cref="ClearItems"/> + 重新 <see cref="CreateItem"/> 是最直的用法；
+    /// 行数多时由调用方自己缓存返回的 <see cref="RectTransform"/>（= "可复用的 item 宿主"）。
+    /// </para>
+    /// </summary>
+    public sealed class VerticalList
+    {
+        /// <summary>列表容器（= <see cref="Viewport"/>；<see cref="ScrollRect"/> 挂在这个节点上）。</summary>
+        public RectTransform Root;
+
+        /// <summary>视口（带遮罩时裁剪发生在这里；<see cref="ScrollRect.viewport"/> 指向它）。</summary>
+        public RectTransform Viewport;
+
+        /// <summary>列表根：所有行都是它的子节点（<see cref="ScrollRect.content"/>）。</summary>
+        public RectTransform Content;
+
+        /// <summary>
+        /// uGUI 滚动件本体。手感参数（<c>movementType</c> / <c>elasticity</c> / <c>decelerationRate</c> /
+        /// <c>inertia</c> / <c>scrollSensitivity</c>）**引擎刻意不预设** —— 那属项目的表现取值，由调用方设。
+        /// </summary>
+        public ScrollRect Scroll;
+
+        /// <summary>行高（画布单位）—— 建列表时给的默认行高。</summary>
+        public float ItemHeight;
+
+        /// <summary>行间距（画布单位）。</summary>
+        public float Spacing;
+
+        /// <summary>一行所占的步进（行高 + 间距）。</summary>
+        public float RowStep => ItemHeight + Spacing;
+
+        /// <summary>当前行数（= 列表根的子节点数）。</summary>
+        public int ItemCount => Content != null ? Content.childCount : 0;
+
+        /// <summary>各行的高度（与行下标一一对应，供 <see cref="Reflow"/> 累加落位）。</summary>
+        private readonly List<float> _rowHeights = new List<float>();
+
+        /// <summary>
+        /// 造一个**行宿主**：锚点 = 顶部横向撑满、轴心 = 顶边中点，尺寸 = (自动宽, <paramref name="height"/>)。
+        /// 它是个空节点，调用方往里挂自己的控件即可；返回它便于后续取用（缓存 = 复用）。
+        /// </summary>
+        /// <param name="name">行名（默认 <c>Item{下标}</c>）。</param>
+        /// <param name="height">行高；<c>&lt;= 0</c> ⇒ 用 <see cref="ItemHeight"/>。</param>
+        public RectTransform CreateItem(string name = null, float height = -1f)
+        {
+            var h = height > 0f ? height : ItemHeight;
+            var index = ItemCount;
+            var item = UIFactory.CreateNode(
+                string.IsNullOrEmpty(name) ? "Item" + index : name, Content);
+            item.anchorMin = new Vector2(0f, 1f);
+            item.anchorMax = new Vector2(1f, 1f);
+            item.pivot = new Vector2(0.5f, 1f);
+            item.sizeDelta = new Vector2(0f, h);
+
+            _rowHeights.Add(h);
+            Reflow();
+            return item;
+        }
+
+        /// <summary>取第 <paramref name="index"/> 行（越界返回 null）。</summary>
+        public RectTransform GetItem(int index)
+        {
+            if (Content == null || index < 0 || index >= Content.childCount) return null;
+            return Content.GetChild(index) as RectTransform;
+        }
+
+        /// <summary>
+        /// 重新按"行高 + 间距"排布所有行，并把 content 高度写成总高。
+        /// <para>
+        /// ⛔ 不写 content 高度的话：滚动范围会算错（拖不动 / 底部行被永久裁掉），见建件注释的坑 ③。
+        /// </para>
+        /// </summary>
+        public void Reflow()
+        {
+            if (Content == null) return;
+
+            var count = Content.childCount;
+            if (_rowHeights.Count > count) _rowHeights.RemoveRange(count, _rowHeights.Count - count);
+
+            var y = 0f;
+            for (var i = 0; i < count; i++)
+            {
+                // 行是外部可能直接建/删的（Content 是公开字段）：临时缺高度时按 ItemHeight 兜底，
+                // 免得"某一行高度 0 导致下面全部叠在一起"。
+                var h = i < _rowHeights.Count ? _rowHeights[i] : ItemHeight;
+                if (i >= _rowHeights.Count) _rowHeights.Add(h);
+
+                if (Content.GetChild(i) is RectTransform rt)
+                {
+                    rt.anchorMin = new Vector2(0f, 1f);
+                    rt.anchorMax = new Vector2(1f, 1f);
+                    rt.pivot = new Vector2(0.5f, 1f);
+                    rt.sizeDelta = new Vector2(rt.sizeDelta.x, h);
+                    rt.anchoredPosition = new Vector2(0f, -y);
+                }
+
+                y += h + Spacing;
+            }
+
+            var total = count > 0 ? y - Spacing : 0f;   // 最后一个行后面不跟间距
+            Content.sizeDelta = new Vector2(Content.sizeDelta.x, Mathf.Max(0f, total));
+        }
+
+        /// <summary>销毁全部行并复位（下一次 <see cref="CreateItem"/> 从第 0 行重新开始）。</summary>
+        public void ClearItems()
+        {
+            if (Content != null)
+            {
+                for (var i = Content.childCount - 1; i >= 0; i--)
+                    UnityEngine.Object.Destroy(Content.GetChild(i).gameObject);
+            }
+            _rowHeights.Clear();
+            if (Content != null) Content.sizeDelta = new Vector2(Content.sizeDelta.x, 0f);
+        }
+
+        /// <summary>
+        /// 滚到顶部。⚠️ 是 <c>1f</c> 不是 <c>0f</c>（<c>verticalNormalizedPosition</c>：1 = 顶、0 = 底）。
+        /// </summary>
+        public void ScrollToTop()
+        {
+            if (Scroll != null) Scroll.verticalNormalizedPosition = 1f;
+        }
+
+        /// <summary>滚到底部。</summary>
+        public void ScrollToBottom()
+        {
+            if (Scroll != null) Scroll.verticalNormalizedPosition = 0f;
+        }
+
+        /// <summary>
+        /// 把第 <paramref name="index"/> 行滚进视野（顶对齐，<paramref name="padding"/> 为再往下的额外偏移）。
+        /// <para>content 高度不大于视口时（= 根本没得滚）不动 —— 否则归一化位置会算出 NaN / 越界的值。</para>
+        /// </summary>
+        public void ScrollToIndex(int index, float padding = 0f)
+        {
+            if (Scroll == null || Content == null || Viewport == null) return;
+
+            var scrollable = Content.rect.height - Viewport.rect.height;
+            if (scrollable <= 0f) return;
+
+            var offset = 0f;
+            var count = Mathf.Min(index, _rowHeights.Count);
+            for (var i = 0; i < count; i++) offset += _rowHeights[i] + Spacing;
+            offset += Mathf.Max(0f, padding);
+
+            Scroll.verticalNormalizedPosition = Mathf.Clamp01(1f - offset / scrollable);
         }
     }
 }

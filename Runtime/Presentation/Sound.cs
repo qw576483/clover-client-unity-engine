@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Presentation/Sound.cs
-// 音效**播放闸门**：缺失只报一次 / 单帧起播上限 / 同 clip 并发上限。
+// 音效**播放闸门**：缺失只报一次 / 单帧起播上限 / 同 clip 并发上限 / 同路径最小重播间隔。
 //
 // 出处：clover-project-cs16 项目侧的「音效发放闸门」——`client/Assets/Scripts/Module/Audio/SfxService.cs`
 //   （201 行：探测状态表 + 单帧计数 + 同音效并发滑动窗口 + 缺失告警计数）与
@@ -26,9 +26,11 @@
 //   ⇒ 每个新项目都要再抄一遍（cs16 已经抄了两份，且两份的告警文案 / 阈值口径已经不一致）。
 //
 // 语义约束（改一条 = 语义漂移；与 `LogThrottle.cs` 的版式一致）：
-//   ① **两个闸门默认 `0` = 不限 = 与本次下沉前逐字一致**：不设闸门时，本文件对播放路径的
+//   ① **三个闸门默认 `0` = 不限 = 与下沉前逐字一致**：不设闸门时，本文件对播放路径的
 //      行为（起播次数 / 日志 / 资源引用计数 / 音源池取源顺序）一个字节都没有变化。
-//   ② 两个闸门**只管 SFX / Voice 的起播**（`PlaySFX` / `PlaySFXAt` / `PlayVoice`）：
+//      第 3 个（同一路径最小重播间隔）见 <see cref="SoundRepeatGate"/> —— 自 diablo2 的
+//      `Module/Audio/SfxThrottle.cs` 下沉，口径逐条对齐（可注入时钟 / 空键放行 / 时间源不可用即惰性）。
+//   ② 三个闸门**只管 SFX / Voice 的起播**（`PlaySFX` / `PlaySFXAt` / `PlayVoice`）：
 //      BGM / 分组音量 / 淡入淡出 / `TakeSource` 的池逻辑 / `Dispose` 语义**一律不动**。
 //   ③ 超限 ⇒ **丢弃该次播放**（⛔ 不排队、⛔ 不打断正在播的音源），并**限频告警**
 //      （`LogThrottle.WarnThrottled`，⛔ 不许裸 `Warn`）；丢弃时归还本次加载的资源引用。
@@ -181,7 +183,7 @@ namespace CloverEngine
             _appPausedSources.Clear();
         }
 
-        // ── 播放闸门：两个都可配，默认 0 = 不限 = 与下沉前逐字一致 ──────────
+        // ── 播放闸门：三个都可配，默认 0 = 不限 = 与下沉前逐字一致 ──────────
         //
         // 为什么要暴露在 ISoundManager 上（而不是只做 SoundManager 的内部字段）：
         // 实现类 internal（G1），业务只拿得到 `Game.Sound`（接口）—— 挂在实现类上等于"业务配不了"，
@@ -198,7 +200,7 @@ namespace CloverEngine
         /// <summary>
         /// 播放闸门：本次是否允许**真正起播** <paramref name="path"/>。
         /// <para>
-        /// 两个闸门都默认 <c>0</c>（= 不限）：此时本方法**不记账、不判理由**，恒定放行 ——
+        /// 三个闸门都默认 <c>0</c>（= 不限）：此时本方法**不记账、不判理由**，恒定放行 ——
         /// 这是"默认值不改变任何既有表现"的落点（见文件头语义约束 ①）。
         /// </para>
         /// <para>
@@ -234,6 +236,18 @@ namespace CloverEngine
                 // key 按路径分：某个音效触发过密时，别的音效的告警不被它吃掉。
                 LogThrottle.WarnThrottled("Sound", "playcap.clip:" + path,
                     $"同一音效同时播放已达上限（MaxConcurrentPerClip = {perClip}），本次播放被丢弃：{path}");
+                return false;
+            }
+
+            // 第 3 维：同一路径的最小重播间隔（时间窗）—— 默认 0 = 不限 ⇒ 不记账、恒定放行。
+            // 判据与"被丢弃的那次不刷新计时"的推导见 SoundRepeatGate。
+            var minRepeat = SoundRepeatGate.MinRepeatSecondsPerClip;
+            if (minRepeat > 0f && SoundRepeatGate.ShouldDrop(path, minRepeat, out var sinceRepeat))
+            {
+                // key 按路径分（同 perClip 口径）：某个音效触发过密时，别的音效的告警不被它吃掉。
+                LogThrottle.WarnThrottled("Sound", "playcap.repeat:" + path,
+                    $"同一音效重播间隔不足（MinRepeatSecondsPerClip = {minRepeat}s），本次播放被丢弃：{path}" +
+                    $"（距上次允许起播 {sinceRepeat:F3}s）");
                 return false;
             }
 
@@ -593,6 +607,118 @@ namespace CloverEngine
                     $"音效池（{_sfxPool.Count} 个音源）已全部占用，本次播放被丢弃；高频音效请错峰或提高池容量");
             }
             return null;
+        }
+    }
+
+    /// <summary>
+    /// 音效播放闸门的**第 3 维**：同一路径的**最小重播间隔（时间窗）** —— 与
+    /// <see cref="SoundManager.MaxPlaysPerFrame"/>（单帧起播上限）、
+    /// <see cref="SoundManager.MaxConcurrentPerClip"/>（同路径真并发上限）互补。
+    /// <para>
+    /// ⛔ <b>缺陷</b>（★ 影响所有项目）：引擎原先只有"单帧上限"与"同时播放上限"，**没有**
+    /// "同一音效 N 秒内不许重播"这一维；某个键被高频请求（实测 portal 约 52 次/秒）时，
+    /// 32 个音源会在 ~0.6s 内被它占满 ⇒ 同一时刻的 hit / monster_attack 在
+    /// <see cref="SoundManager.GetAvailableSource"/> 的池满分支被**静默丢弃**。
+    /// </para>
+    /// <para><b>最小复现</b>：保持 <see cref="MinRepeatSecondsPerClip"/> = <c>0</c>（不限），
+    /// 对同一 clip 连发请求超过 32 次 ⇒ 日志出现 <c>音效池（32 个音源）已全部占用，本次播放被丢弃</c>，
+    /// 后续其它音效全被丢弃。</para>
+    /// <para><b>修复后自证</b>：置 <see cref="MinRepeatSecondsPerClip"/> = <c>0.1f</c> 后，同一键
+    /// 100ms 内的第 2 / 3 次起播被丢弃（<see cref="DropCount"/> 累加），其它键照常放行；
+    /// 默认 <c>0</c> ⇒ 不记账、恒定放行（与另外两个闸门同口径）。等价性由项目侧
+    /// <c>SfxThrottle</c> 的边界用例在改前/改后逐行比对（脚本见
+    /// <c>clover-project-diablo2/.ai-tmp/test/</c>）。</para>
+    /// <para><b>已知边界 / 精度限制</b>：时间源不可用（时钟为 <c>null</c> 且 Unity 时钟抛异常 —— 即非
+    /// Unity 宿主，同 <see cref="LogThrottle"/> 记录的坑；或取值 <c>&lt;= 0</c>）⇒ **闸门惰性（不丢弃）**，
+    /// 宁可漏节流也不许吞掉正常音效；时钟回退（<c>now &lt; last</c>）按"间隔不足"丢弃。
+    /// ⛔ <b>不许</b>在热路径裸读 <c>Time.realtimeSinceStartup</c> / <c>Time.unscaledTime</c>
+    /// 而不接异常 —— 非 Unity 宿主会崩。非线程安全，主线程使用。</para>
+    /// <para><b>用法 + 首个消费方</b>：业务置 <c>CloverEngine.SoundRepeatGate.MinRepeatSecondsPerClip</c>
+    /// （默认 <c>0</c> = 不限；契约上不去 <see cref="ISoundManager"/> 是因为闸门状态是**全进程共享的静态计时表**，
+    /// 与另外两个"实例可配"的闸门分工不同 —— 见 `结构规则.md` §4.4）。首个消费方 =
+    /// <see cref="SoundManager.AllowPlay"/>（本文件）；离线自检请注入
+    /// <see cref="Clock"/>（<c>() =&gt; 秒</c>）以获得确定性计时。</para>
+    /// </summary>
+    public static class SoundRepeatGate
+    {
+        /// <summary>
+        /// 同一路径的最小重播间隔（秒）。<c>0</c>（默认）= **不限** —— 此时
+        /// <see cref="ShouldDrop"/> 不记账、恒定返回 <c>false</c>。取值由**业务**下发
+        /// （引擎不含任何项目数值，与另外两个闸门同一分工）。
+        /// </summary>
+        public static float MinRepeatSecondsPerClip { get; set; }
+
+        /// <summary>
+        /// 可注入时钟（返回**秒**，语义同 <c>UnityEngine.Time.unscaledTime</c>：不受 <c>timeScale</c>
+        /// 影响 ⇒ 暂停时也不误判）。默认 <c>null</c> = 用 Unity <c>Time.unscaledTime</c>；
+        /// **非 Unity 宿主调用会抛异常** ⇒ 本类接住并按"时间源不可用"处理（见 <see cref="ShouldDrop"/>），
+        /// 因此离线宿主不注入也不会崩，只是闸门惰性。离线自检请注入自己的时钟。
+        /// </summary>
+        public static Func<float> Clock { get; set; }
+
+        /// <summary>累计被本闸门丢弃的次数（自检 / 排障用；生产只读）。</summary>
+        public static int DropCount { get; private set; }
+
+        /// <summary>每个键最近一次**被允许起播**的时刻（只由主线程访问）。</summary>
+        private static readonly Dictionary<string, float> LastPlayAt =
+            new Dictionary<string, float>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 是否丢弃本次起播：距同一 <paramref name="key"/> 上次**被允许起播**的间隔
+        /// <c>&lt; intervalSeconds</c> ⇒ <c>true</c>。语义逐条对齐项目侧 <c>SfxThrottle.ShouldDrop</c>
+        /// （出处 `clover-project-diablo2/client/Assets/Scripts/Module/Audio/SfxThrottle.cs`，本方法即其执行口径）：
+        /// <paramref name="intervalSeconds"/> <c>&lt;= 0</c>（= 不限）/ 空 <c>key</c> / 时间源不可用 ⇒ <c>false</c>（放行）；
+        /// 只有"被允许"的那一次刷新计时 ⇒ 被丢弃的请求不会把窗口越推越远（不会造成"永久静音"）。
+        /// </summary>
+        /// <param name="sinceSeconds">返回 <c>true</c> 时 = 距上次被允许起播的间隔（供日志 / 断言核数）。</param>
+        public static bool ShouldDrop(string key, float intervalSeconds, out float sinceSeconds)
+        {
+            sinceSeconds = 0f;
+            if (intervalSeconds <= 0f) return false;         // 0 = 不限（默认）⇒ 不记账、恒定放行
+            if (string.IsNullOrEmpty(key)) return false;
+
+            float now;
+            try
+            {
+                var clock = Clock;
+                now = clock != null ? clock() : Time.unscaledTime;
+            }
+            catch (Exception)
+            {
+                // 非 Unity 宿主 / 时钟不可读 ⇒ 放行（时间源不可用口径，见类注释）
+                return false;
+            }
+
+            if (now <= 0f) return false;                     // 时间源不可用 ⇒ 闸门惰性
+
+            float last;
+            if (!LastPlayAt.TryGetValue(key, out last))
+            {
+                LastPlayAt[key] = now;
+                return false;                                // 该键首次请求 ⇒ 放行
+            }
+
+            var since = now - last;
+            if (since >= intervalSeconds)
+            {
+                LastPlayAt[key] = now;
+                return false;                                // 已超过最小间隔 ⇒ 放行并刷新计时
+            }
+
+            sinceSeconds = since;
+            DropCount++;
+            return true;                                     // 间隔不足 ⇒ 丢弃（⛔ 不刷新计时）
+        }
+
+        /// <summary>
+        /// 清空计时与丢弃计数，并把 <see cref="Clock"/> 恢复为默认（<c>null</c>）。
+        /// **仅供离线自检宿主**（同一进程里跑多个用例）。
+        /// </summary>
+        public static void Reset()
+        {
+            LastPlayAt.Clear();
+            DropCount = 0;
+            Clock = null;
         }
     }
 }

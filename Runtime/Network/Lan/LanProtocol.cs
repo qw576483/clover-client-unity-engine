@@ -27,8 +27,22 @@ namespace CloverEngine
     /// 不经 <c>Router</c>、不碰 <c>TransportKind</c> / <c>CloverNet</c>。
     /// 魔数用 <c>LAN</c> 段与其它 Clover 协议区分。
     /// </para>
+    ///
+    /// <para>
+    /// <b>双向公开</b>：本类是**公开契约**（2026-09-24 由 <c>internal</c> 提升为 <c>public</c>）——
+    /// 「问」的一侧由引擎自带（<see cref="ILanBrowser"/>），「答」的一侧也已补齐
+    /// （<see cref="ILanResponder"/>，经 <see cref="CloverLan.CreateResponder"/> 取得）。
+    /// 公开协议是为了让业务**不再逐字复制一份线格式**：复制品一旦漂移，表现是
+    /// 「明明有主机在跑却一台都扫不到」，且两端各看各的代码都"没问题"。
+    /// </para>
+    ///
+    /// <para>
+    /// ⛔ <b>格式冻结</b>：<see cref="QueryMagic"/> / <see cref="ReplyMagic"/> /
+    /// <see cref="DefaultPort"/> / <see cref="MaxDatagramBytes"/> / <see cref="NonceBytes"/> 与
+    /// nonce 回显语义**逐字不可改** —— 改一个字符即与既有主机 / 既有客户端不兼容。
+    /// </para>
     /// </summary>
-    internal static class LanProtocol
+    public static class LanProtocol
     {
         /// <summary>默认查询端口（与网关 <c>listen_tcp</c>/<c>listen_udp</c> 无关，是寻服专用端口）。</summary>
         public const int DefaultPort = 47777;
@@ -77,6 +91,153 @@ namespace CloverEngine
         public static byte[] BuildQuery(string nonce)
         {
             return Encoding.UTF8.GetBytes($"{QueryMagic}|{nonce}");
+        }
+
+        /// <summary>
+        /// 解析一条**查询**报文（应答端用）。任一条校验不过返回 false —— 调用方据此计数丢弃、
+        /// **不回包**（回了也过不了对端校验，只会给自己和网络添噪音）。
+        ///
+        /// <para>校验顺序（与 <see cref="TryParseReply"/> 同口径，先廉价后昂贵）：</para>
+        /// <list type="number">
+        /// <item>空包 / 超长（&gt; <see cref="MaxDatagramBytes"/>）丢弃；</item>
+        /// <item>首段必须是 <see cref="QueryMagic"/>（版本不符也在此拦下）；</item>
+        /// <item><c>nonce</c> 必须**非空**：回显不了 nonce 的查询，回了也会被对端当「串味包」丢掉。</item>
+        /// </list>
+        ///
+        /// <para>
+        /// 为什么 nonce 只判「非空」而**不判**「32 位小写 hex」：对端可能是本引擎之外的实现
+        /// （工具 / 别的语言写的客户端），把长度与字符集卡死会把合法查询挡在门外。
+        /// nonce 原样回显即可，归属校验由**问的一方**用自己的 nonce 做。
+        /// </para>
+        /// </summary>
+        /// <param name="datagram">收到的字节</param>
+        /// <param name="length">有效长度（&lt;= datagram.Length）</param>
+        /// <param name="nonce">成功时输出回显用的 nonce（失败为 null）</param>
+        /// <param name="error">失败原因（成功为 null）</param>
+        /// <returns>通过全部校验返回 true</returns>
+        public static bool TryParseQuery(byte[] datagram, int length, out string nonce, out string error)
+        {
+            nonce = null;
+            error = null;
+
+            if (datagram == null)
+            {
+                error = "报文为空引用";
+                return false;
+            }
+
+            if (length <= 0)
+            {
+                error = "空包";
+                return false;
+            }
+
+            if (length > MaxDatagramBytes)
+            {
+                error = $"超长包（{length} 字节 > 上限 {MaxDatagramBytes}）";
+                return false;
+            }
+
+            if (length > datagram.Length)
+            {
+                error = $"声明长度 {length} 超出缓冲区 {datagram.Length}";
+                return false;
+            }
+
+            string text;
+            try
+            {
+                text = Encoding.UTF8.GetString(datagram, 0, length);
+            }
+            catch (Exception ex)
+            {
+                // 与 TryParseReply 同口径：解析期的任何异常都不许冒泡出收包线程。
+                error = $"UTF8 解码失败：{ex.Message}";
+                return false;
+            }
+
+            var separator = text.IndexOf('|');
+            if (separator < 0)
+            {
+                error = $"缺少分隔符 '|'（形如 {QueryMagic}|<nonce>）";
+                return false;
+            }
+
+            var magic = text.Substring(0, separator);
+            if (!string.Equals(magic, QueryMagic, StringComparison.Ordinal))
+            {
+                error = $"魔数不符（首段=\"{Truncate(magic)}\"，期望 \"{QueryMagic}\"）";
+                return false;
+            }
+
+            var parsed = text.Substring(separator + 1).Trim();
+            if (parsed.Length == 0)
+            {
+                error = "查询未带 nonce（回显不了 nonce，对端必然丢弃）";
+                return false;
+            }
+
+            nonce = parsed;
+            return true;
+        }
+
+        /// <summary>
+        /// 构造一条**应答**报文的文本（应答端用）：<c>CLOVER-LAN-REPLY/1|{json}</c>。
+        ///
+        /// <para>
+        /// 字段名与 <see cref="TryParseReply"/> 读的**逐字同源**：取值全部来自
+        /// <paramref name="self"/>（应答端对外广播的主机快照）；可选字段为空时**不出现在报文里**
+        /// （对端按缺省值处理，报文更短）。JSON 由 <see cref="MiniJson.Dump"/> 输出 ——
+        /// 转义、键序稳定、UTF-8，不做手工拼串（手工拼串漏一个转义就会让整包 JSON 非法）。
+        /// </para>
+        /// </summary>
+        /// <param name="nonce">查询报文里的 nonce（原样回显）</param>
+        /// <param name="self">本机对外广播的主机信息（须有合法 <c>Host</c> 与 <c>GatewayPort</c>）</param>
+        /// <exception cref="ArgumentNullException"><paramref name="self"/> 为 null（调用方编程错误）</exception>
+        /// <exception cref="ArgumentException"><paramref name="nonce"/> 为空（调用方编程错误）</exception>
+        public static string BuildReplyText(string nonce, LanHostInfo self)
+        {
+            if (self == null)
+                throw new ArgumentNullException(nameof(self));
+            if (string.IsNullOrEmpty(nonce))
+                throw new ArgumentException("nonce 不能为空（对端用它校验应答归属）", nameof(nonce));
+
+            var body = new Dictionary<string, object>
+            {
+                { "nonce", nonce },
+                { "gateway", $"{self.Host}:{self.GatewayPort}" },
+                { "players", (long)self.Players },
+                { "max", (long)self.MaxPlayers },
+            };
+
+            if (!string.IsNullOrEmpty(self.Name))
+                body["name"] = self.Name;
+            if (self.UdpPort > 0)
+                body["udp"] = $"{self.Host}:{self.UdpPort}";
+            if (!string.IsNullOrEmpty(self.AuthAddr))
+                body["auth"] = self.AuthAddr;
+            if (!string.IsNullOrEmpty(self.Version))
+                body["version"] = self.Version;
+            if (!string.IsNullOrEmpty(self.Extra))
+                body["extra"] = self.Extra;
+
+            return $"{ReplyMagic}|{MiniJson.Dump(body)}";
+        }
+
+        /// <summary>
+        /// 构造一条**应答**报文（UTF-8 单包）。
+        ///
+        /// <para>
+        /// <b>不保证</b>落在 <see cref="MaxDatagramBytes"/> 内 —— 超长由调用方处理
+        /// （<see cref="ILanResponder"/> 的做法：截短可选字段后重发，仍超长则丢弃并留痕）。
+        /// 协议侧保持纯函数，不替调用方做丢包决策。
+        /// </para>
+        /// </summary>
+        /// <param name="nonce">查询报文里的 nonce（原样回显）</param>
+        /// <param name="self">本机对外广播的主机信息</param>
+        public static byte[] BuildReply(string nonce, LanHostInfo self)
+        {
+            return Encoding.UTF8.GetBytes(BuildReplyText(nonce, self));
         }
 
         /// <summary>

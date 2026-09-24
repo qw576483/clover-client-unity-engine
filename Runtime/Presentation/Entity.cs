@@ -160,6 +160,76 @@ namespace CloverEngine
     }
 
     /// <summary>
+    /// **实体视图来源**（`EntityViewFactory` 的**视图来源可插拔接缝**）：把「视图规格」变成
+    /// 「场景里看得见的视图内容」。
+    ///
+    /// <para>
+    /// ⛔ <b>缺陷（本接缝补的就是它）</b>：此前实体的建 / 绑 / 销骨架**只有 3D 一条路**
+    /// （<c>EntityViewFactory</c>：3D 模型 + `AnimatorController`），2D 精灵项目拿不到骨架
+    /// ⇒ 只能自建第二套实体视图生命周期。★ 影响范围：所有 2D / 像素风项目。
+    /// </para>
+    /// <para>
+    /// <b>最小复现</b>：不注册任何来源时 <c>CloverPresentation.EntityView.CreateView(id, spec)</c>
+    /// 只可能产出胶囊占位 + 3D 模型；要看 2D 精灵实体，业务必须自己
+    /// <c>new GameObject</c> + <c>AddComponent&lt;SpriteRenderer&gt;</c> + 自己管贴图 / 帧动画 / 排序 / 回收
+    /// （实测参考：`clover-project-diablo2` 的 `Module/View/ViewModule.cs`，
+    /// `EnsureRoot:1296` / `CreateEntityNode:1444` / `DestroyView:1716` / `RefreshAllFrames:1694`）。
+    /// </para>
+    /// <para>
+    /// <b>修复后自证</b>：注册 <see cref="SpriteEntityViewSource"/>（或任何实现了本接口的类型）后，
+    /// 同一句 <c>CreateView</c> 产出的就是来源自己的视图；<b>未注册来源时 3D 路径逐字不变</b>
+    /// （工厂里只多一个 <c>source == null</c> 分支）。
+    /// </para>
+    /// <para>
+    /// <b>已知边界</b>：
+    /// ① 来源**不拥有根节点** —— 根节点仍由 <c>EntityViewFactory</c> 建、由它（及 `IEntityManager`）销毁；
+    ///    <see cref="Release"/> 只许释放来源自己的记录（资源引用 / 池化子节点），⛔ 不许销毁根节点；
+    /// ② <see cref="Build"/> 返回 <c>false</c> 时**必须自己撤销已建内容**，否则工厂回落到 3D 路径后
+    ///    根节点上会叠两套表现；
+    /// ③ 来源接管后，`EntityViewSpec.ModelPath` / `AnimatorPath` 的**资源引用归来源管**
+    ///    （工厂不再 Release 它们），⛔ 别两边都 Release（引用计数会被多扣）；
+    /// ④ 注册表是**进程级**的（不是工厂实例级）；建议在 `Game.Launch` 之后的接线钩子里注册一次。
+    /// </para>
+    /// <para>
+    /// <b>用法 + 首个消费方</b>：
+    /// <code>
+    /// // 2D 项目：整条实体视图链路都走精灵视图
+    /// EntityViewFactory.RegisterSource(new SpriteEntityViewSource(layers: myLayers), asDefault: true);
+    ///
+    /// // 3D 项目里只想让某类实体走 2D（按自己的资源路径约定筛选）
+    /// EntityViewFactory.RegisterSource(new SpriteEntityViewSource(spec =&gt; spec.ModelPath.StartsWith("UI/Icons/")));
+    /// </code>
+    /// 首个消费方：`clover-project-diablo2` 的实体视图（`Module/View/ViewModule.cs`），
+    /// 接线由收尾片做（本片只补引擎侧骨架）。
+    /// </para>
+    /// </summary>
+    public interface IEntityViewSource
+    {
+        /// <summary>
+        /// 本来源是否负责这条规格。<c>true</c> = 该实体的视图内容全交本来源（3D 路径不参与）。
+        /// <para>按注册顺序询问**非默认**来源；都不认领时才用「默认来源」。</para>
+        /// </summary>
+        bool CanBuild(EntityViewSpec spec);
+
+        /// <summary>
+        /// 在 <paramref name="root"/>（工厂已建好的视图根节点）下建出视图内容；返回 <c>false</c> = 没建出，
+        /// 工厂会回落 3D 占位路径（见接口注释的边界 ②）。
+        /// <para>口径与 <see cref="IEntityViewFactory.CreateView"/> 一致：<b>同步</b>返回时可见内容就绪
+        /// （占位块已上）、异步部分（贴图 / 模型）自行补上。</para>
+        /// </summary>
+        bool Build(long objectID, GameObject root, EntityViewSpec spec);
+
+        /// <summary>释放本来源侧该实体的记录（资源引用 / 池化子节点…）。不存在的 id 静默忽略。</summary>
+        void Release(long objectID);
+
+        /// <summary>该实体的视图内容是否仍在加载中（排障 / 进度展示用）。</summary>
+        bool IsLoading(long objectID);
+
+        /// <summary>取该实体的动画播放器（3D = <see cref="IAnimPlayer"/>；2D 帧动画没有此口径，返回 null）。</summary>
+        IAnimPlayer GetAnimator(long objectID);
+    }
+
+    /// <summary>
     /// 实体视图工厂实现（契约见 <see cref="IEntityViewFactory"/>）。
     ///
     /// 一次 CreateView 的完整流程（每一步都对应一个已踩过的静默失败）：
@@ -183,6 +253,12 @@ namespace CloverEngine
             public string ModelPath;
             public string AnimatorPath;
             public bool Loading;
+
+            /// <summary>
+            /// 接管本视图的**视图来源**（没有 = 走 3D 路径）。非 null 时本记录的 ModelPath / AnimatorPath
+            /// 已被清空（资源引用归来源管，见 <see cref="IEntityViewSource"/> 边界 ③）。
+            /// </summary>
+            public IEntityViewSource Source;
         }
 
         private readonly Dictionary<long, ViewRecord> _views = new Dictionary<long, ViewRecord>();
@@ -231,13 +307,20 @@ namespace CloverEngine
             var name = string.IsNullOrEmpty(spec.NodeName) ? $"Entity_{objectID}" : spec.NodeName;
             var root = new GameObject(name);
 
+            var source = ResolveSource(spec);
             var rec = new ViewRecord
             {
                 Root = root,
                 ModelPath = spec.ModelPath,
                 AnimatorPath = spec.AnimatorPath,
+                Source = source,
             };
             _views[objectID] = rec;
+
+            // ★ 视图来源接缝（见 IEntityViewSource）：注册了来源且它认领这条规格 ⇒ 视图内容全交来源，
+            //   3D 的「胶囊占位 + 模型异步补 + AnimatorController」一律不参与（两条路径互斥，避免叠两套内容）。
+            if (source != null && BuildViaSource(objectID, root, spec, rec, source))
+                return root;
 
             rec.Placeholder = BuildPlaceholder(root.transform, spec);
 
@@ -303,13 +386,15 @@ namespace CloverEngine
         /// <inheritdoc />
         public bool IsLoading(long objectID)
         {
-            return _views.TryGetValue(objectID, out var rec) && rec.Loading;
+            return _views.TryGetValue(objectID, out var rec)
+                && (rec.Loading || (rec.Source != null && rec.Source.IsLoading(objectID)));
         }
 
         /// <inheritdoc />
         public IAnimPlayer GetAnimator(long objectID)
         {
-            return _views.TryGetValue(objectID, out var rec) ? rec.Anim : null;
+            if (!_views.TryGetValue(objectID, out var rec)) return null;
+            return rec.Anim ?? rec.Source?.GetAnimator(objectID);
         }
 
         /// <inheritdoc />
@@ -317,6 +402,26 @@ namespace CloverEngine
         {
             if (!_views.TryGetValue(objectID, out var rec)) return;
             _views.Remove(objectID);   // 先摘表：加载回调里的"实体还在吗"检查因此能立刻失败
+
+            // ★ 来源接管过的视图：先让来源释放自己的记录（贴图引用 / 池化子节点），再销毁根节点。
+            //   顺序不能反 —— 池化子节点必须在根节点被 Destroy **之前**归还，否则池里留下"已销毁对象"
+            //   的引用（下次 Spawn 时要靠告警丢弃，且永远不会被复用）。
+            if (rec.Source != null)
+            {
+                var src = rec.Source;
+                rec.Source = null;   // 先清引用：来源 Release 里抛异常也不会让后续路径重复调用
+                try
+                {
+                    src.Release(objectID);
+                }
+                catch (Exception e)
+                {
+                    // 非预期分支：来源释放抛异常 ⇒ 留痕但不阻断（根节点仍要销毁，否则实体没了视图还在）
+                    Game.Logger?.Warn("EntityView",
+                        $"视图来源 {src.GetType().Name} 释放实体 {objectID} 时抛异常（根节点仍会销毁）：" +
+                        $"{e.GetType().Name}: {e.Message}");
+                }
+            }
 
             var anim = Anim;
             if (rec.Anim != null && anim != null)
@@ -344,6 +449,125 @@ namespace CloverEngine
             var ids = new List<long>(_views.Keys);
             foreach (var id in ids)
                 ReleaseView(id);
+        }
+
+        // ─────────────────── 视图来源注册表（可插拔接缝，契约见 IEntityViewSource） ───────────────────
+
+        /// <summary>非默认来源：按注册顺序问 <see cref="IEntityViewSource.CanBuild"/>，先认领者接管。</summary>
+        private static readonly List<IEntityViewSource> Sources = new List<IEntityViewSource>();
+
+        /// <summary>
+        /// 默认来源：没有任何非默认来源认领该规格时用它。
+        /// 「整条实体视图链路都走同一套视图」（例如纯 2D 项目走精灵视图）就注册成默认。
+        /// </summary>
+        private static IEntityViewSource DefaultSource;
+
+        /// <summary>
+        /// 注册一个视图来源（**进程级**，注册一次即可；建议在 <c>Game.Launch</c> 之后的接线钩子里调）。
+        /// <para>
+        /// <paramref name="asDefault"/> = <c>true</c> ⇒ 记为默认来源（不参与 <see cref="IEntityViewSource.CanBuild"/>
+        /// 筛选，只在没人认领时兜底），用于"本项目所有实体都用这套视图"；<c>false</c> ⇒ 按注册顺序参与筛选。
+        /// </para>
+        /// <para>重复注册同一个实例 = 无操作；传 <c>null</c> = 无操作（不抛、不留痕）。</para>
+        /// </summary>
+        public static void RegisterSource(IEntityViewSource source, bool asDefault = false)
+        {
+            if (source == null) return;
+
+            if (asDefault)
+            {
+                if (!ReferenceEquals(DefaultSource, source))
+                    Game.Logger?.Info("EntityView", $"默认视图来源已注册：{source.GetType().Name}");
+                DefaultSource = source;
+                return;
+            }
+
+            if (Sources.Contains(source)) return;
+            Sources.Add(source);
+            Game.Logger?.Info("EntityView",
+                $"视图来源已注册：{source.GetType().Name}（非默认来源共 {Sources.Count} 个）");
+        }
+
+        /// <summary>注销视图来源（传 <c>null</c> 无操作）。注销默认来源后回落 3D 路径。</summary>
+        public static void UnregisterSource(IEntityViewSource source)
+        {
+            if (source == null) return;
+            if (ReferenceEquals(DefaultSource, source)) DefaultSource = null;
+            Sources.Remove(source);
+        }
+
+        /// <summary>清空全部来源注册（切服 / 引擎拆卸用，避免静态表跨局持有业务对象）。</summary>
+        public static void ClearSources()
+        {
+            Sources.Clear();
+            DefaultSource = null;
+        }
+
+        /// <summary>
+        /// 该规格该用哪个来源：先按注册顺序问非默认来源（<see cref="IEntityViewSource.CanBuild"/>），
+        /// 都不认领再用默认来源；都没有 = <c>null</c> ⇒ 走既有 3D 路径（行为逐字不变）。
+        /// </summary>
+        private static IEntityViewSource ResolveSource(EntityViewSpec spec)
+        {
+            for (var i = 0; i < Sources.Count; i++)
+            {
+                try
+                {
+                    if (Sources[i].CanBuild(spec)) return Sources[i];
+                }
+                catch (Exception e)
+                {
+                    // 非预期分支：筛选器抛异常 ⇒ 留痕并按「不认领」处理（不能让一条规格把整条创建链打断）
+                    Game.Logger?.Warn("EntityView",
+                        $"视图来源 {Sources[i].GetType().Name}.CanBuild 抛异常，按「不认领」处理：" +
+                        $"{e.GetType().Name}: {e.Message}");
+                }
+            }
+            return DefaultSource;
+        }
+
+        /// <summary>
+        /// 让来源建视图内容：<c>true</c> = 来源接管（3D 占位 / 模型 / 动画全不参与）；
+        /// <c>false</c> / 抛异常 = 回落 3D 路径（来源必须自己撤销已建内容，见 <see cref="IEntityViewSource"/> 边界 ②）。
+        /// </summary>
+        private static bool BuildViaSource(long objectID, GameObject root, EntityViewSpec spec,
+            ViewRecord rec, IEntityViewSource source)
+        {
+            var built = false;
+            try
+            {
+                built = source.Build(objectID, root, spec);
+            }
+            catch (Exception e)
+            {
+                Game.Logger?.Error("EntityView",
+                    $"视图来源 {source.GetType().Name} 建视图抛异常（按「没建出」处理，回落 3D 路径）：" +
+                    $"id={objectID}", e);
+            }
+
+            if (built)
+            {
+                // 来源接管资源生命周期 ⇒ 清掉 3D 记录里的资源路径，ReleaseView 不再对它们 Release
+                //（否则同一份资源被「来源 + 工厂」各 Release 一次，引用计数被多扣 ⇒ 缓存提前淘汰）。
+                rec.ModelPath = null;
+                rec.AnimatorPath = null;
+                return true;
+            }
+
+            try
+            {
+                source.Release(objectID);   // 撤回来源侧可能已登记的记录（贴图引用 / 池化子节点）
+            }
+            catch (Exception e)
+            {
+                Game.Logger?.Warn("EntityView",
+                    $"视图来源 {source.GetType().Name} 回撤已建内容时抛异常：id={objectID} " +
+                    $"{e.GetType().Name}: {e.Message}");
+            }
+            rec.Source = null;
+            Game.Logger?.Warn("EntityView",
+                $"视图来源 {source.GetType().Name} 未建出视图（id={objectID}）⇒ 回落 3D 占位路径");
+            return false;
         }
 
         private static GameObject BuildPlaceholder(Transform parent, EntityViewSpec spec)

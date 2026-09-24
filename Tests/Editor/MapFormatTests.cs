@@ -211,5 +211,157 @@ namespace CloverEngine.Tests
             d.Width = CloverMapWriter.MaxDimension + 1;
             Assert.Throws<ArgumentException>(() => CloverMapWriter.Encode(d));
         }
+
+        // ─────────────────── 命名标记点段（FlagMarkers，V1 追加段）───────────────────
+        //
+        // 契约有三条，缺一条就是"文件能读、游戏能起，只是按名取点全落空 / 点位错乱"的静默失败：
+        //   ① 没有标记点时**一个字节都不许多**（旧产物照旧可解、旧读端也不会因空段报错）；
+        //   ② 有标记点时新段**只追加在末尾**（既有段逐字节不变）；
+        //   ③ 截断 / 坏数据必须当场报错。
+
+        private static CloverMapMarker[] MarkersSample() => new[]
+        {
+            new CloverMapMarker("Spawn_T", new Vector3(-11.5f, 3.556f, -46.5f)),
+            new CloverMapMarker("Spawn_T", new Vector3(-11.5f, 3.556f, -48.5f)), // 同名多点：一组
+            new CloverMapMarker("包点A", new Vector3(1.25f, 0.5f, -2.75f)),     // 中文名：UTF-8
+        };
+
+        /// <summary>① 旧产物：不置 FlagMarkers 位、不写段，布局与旧版逐字节一致。</summary>
+        [Test]
+        public void Encode_NoMarkers_KeepsLegacyLayout()
+        {
+            var d = Sample();
+            byte[] b = CloverMapWriter.Encode(d);
+            int nameLen = System.Text.Encoding.UTF8.GetByteCount(d.Name);
+            int bitsLen = (4 * 4 + 7) / 8;
+
+            Assert.AreEqual(CloverMapFormat.FlagWalkable, BitConverter.ToUInt16(b, 6), "flags 不该含 FlagMarkers");
+            Assert.AreEqual(CloverMapFormat.HeaderSize + nameLen + bitsLen
+                            + CloverMapFormat.ColliderStride + CloverMapFormat.SpawnStride,
+                            b.Length, "无标记点时多写了字节");
+
+            Assert.IsTrue(CloverMapFormat.TryDecode(b, out var map, out string err), err);
+            Assert.AreEqual(0, map.MarkerCount, "旧产物应解出 0 个标记点");
+            Assert.IsNotNull(map.Markers, "Markers 应为空数组而不是 null");
+        }
+
+        /// <summary>② 新产物：只追加在末尾 + 中文名/同名多点往返 + 既有段逐字节不变。</summary>
+        [Test]
+        public void Encode_Markers_RoundTrip()
+        {
+            byte[] legacy = CloverMapWriter.Encode(Sample());
+
+            var d = Sample();
+            d.Markers = MarkersSample();
+            byte[] b = CloverMapWriter.Encode(d);
+
+            Assert.AreEqual(CloverMapFormat.FlagWalkable | CloverMapFormat.FlagMarkers,
+                BitConverter.ToUInt16(b, 6), "flags 应置 FlagMarkers");
+
+            int markerBytes = 4;
+            foreach (var m in d.Markers)
+                markerBytes += CloverMapFormat.MarkerStride
+                               + System.Text.Encoding.UTF8.GetByteCount(m.Name);
+            Assert.AreEqual(legacy.Length + markerBytes, b.Length, "段字节数不符");
+
+            // 定长头里只有 flags（偏移 6..7）按设计不同；头之后的既有段必须逐字节一致。
+            for (int i = CloverMapFormat.HeaderSize; i < legacy.Length; i++)
+                Assert.AreEqual(legacy[i], b[i], $"既有段第 {i} 字节被改动（新段只许追加在末尾）");
+            Assert.AreEqual((uint)d.Markers.Length,
+                BitConverter.ToUInt32(b, legacy.Length), "marker_count 应紧跟既有段");
+
+            Assert.IsTrue(CloverMapFormat.TryDecode(b, out var map, out string err), err);
+            Assert.AreEqual(d.Markers.Length, map.MarkerCount);
+            for (int i = 0; i < d.Markers.Length; i++)
+            {
+                Assert.AreEqual(d.Markers[i].Name, map.Markers[i].Name, $"第 {i} 个标记点名字（UTF-8 往返）");
+                Assert.AreEqual(d.Markers[i].Position.x, map.Markers[i].Position.x, 1e-6f);
+                Assert.AreEqual(d.Markers[i].Position.y, map.Markers[i].Position.y, 1e-6f);
+                Assert.AreEqual(d.Markers[i].Position.z, map.Markers[i].Position.z, 1e-6f);
+            }
+            Assert.AreEqual(15, map.WalkableCount, "既有字段被标记段污染了");
+        }
+
+        /// <summary>③ 截断（含砍在标记段内部）必须报错，不许当成好文件。</summary>
+        [Test]
+        public void Decode_MarkersTruncated_Rejected()
+        {
+            var d = Sample();
+            d.Markers = MarkersSample();
+            byte[] full = CloverMapWriter.Encode(d);
+            int legacyLen = CloverMapWriter.Encode(Sample()).Length;
+            int markerBytes = full.Length - legacyLen;
+
+            for (int cut = 1; cut <= markerBytes + 3 && cut < full.Length; cut++)
+            {
+                var cutOff = new byte[full.Length - cut];
+                Array.Copy(full, cutOff, cutOff.Length);
+                Assert.IsFalse(CloverMapFormat.TryDecode(cutOff, out _, out _),
+                    $"砍掉尾部 {cut} 字节后仍被当成合法文件");
+            }
+        }
+
+        /// <summary>③ 段内坏数据（空名字 / NaN 坐标 / 负数数量）必须报错——放行就是"按名取不到点"的静默失败。</summary>
+        [Test]
+        public void Decode_MarkersBadData_Rejected()
+        {
+            var d = Sample();
+            d.Markers = MarkersSample();
+            byte[] full = CloverMapWriter.Encode(d);
+            int markerOff = full.Length - (4 + CloverMapFormat.MarkerStride * 3
+                                           + System.Text.Encoding.UTF8.GetByteCount("Spawn_T") * 2
+                                           + System.Text.Encoding.UTF8.GetByteCount("包点A"));
+
+            AssertMarkersRejected(full, markerOff, new byte[] { 0xFF, 0xFF, 0xFF, 0xFF }, "数量非法");     // count = -1
+            AssertMarkersRejected(full, markerOff + 4, new byte[] { 0, 0, 0, 0 }, "名字为空");            // 空名字
+            AssertMarkersRejected(full, markerOff + 4, new byte[] { 0xFF, 0xFF, 0x00, 0x00 }, "名字长度非法"); // 长度越界
+            // 第 0 个标记点名 "Spawn_T" = 7 字节 ⇒ 坐标起点 = 段头(4) + 长度前缀(4) + 名字(7)
+            AssertMarkersRejected(full, markerOff + 4 + 4 + 7, BitConverter.GetBytes(float.NaN), "坐标非法");
+        }
+
+        private static void AssertMarkersRejected(byte[] src, int offset, byte[] patch, string expectInMessage)
+        {
+            var copy = (byte[])src.Clone();
+            Array.Copy(patch, 0, copy, offset, patch.Length);
+            bool ok = CloverMapFormat.TryDecode(copy, out _, out string err);
+            Assert.IsFalse(ok, $"期望解码失败（{expectInMessage}）但成功了");
+            StringAssert.Contains(expectInMessage, err ?? string.Empty,
+                $"错误信息里应出现「{expectInMessage}」，实际: {err}");
+        }
+
+        /// <summary>编码端不许放过坏标记点（否则"导出成功、运行时读不了"，且错误会指向解码端）。</summary>
+        [Test]
+        public void Encode_RejectsBadMarkers()
+        {
+            var emptyName = Sample();
+            emptyName.Markers = new[] { new CloverMapMarker(string.Empty, Vector3.zero) };
+            Assert.Throws<ArgumentException>(() => CloverMapWriter.Encode(emptyName));
+
+            var nanPos = Sample();
+            nanPos.Markers = new[] { new CloverMapMarker("A", new Vector3(float.NaN, 0f, 0f)) };
+            Assert.Throws<ArgumentException>(() => CloverMapWriter.Encode(nanPos));
+
+            // 空数组（不是 null）必须回落到旧布局：不写段、不置位。
+            var noMarkers = Sample();
+            noMarkers.Markers = Array.Empty<CloverMapMarker>();
+            byte[] b = CloverMapWriter.Encode(noMarkers);
+            Assert.AreEqual(CloverMapWriter.Encode(Sample()).Length, b.Length);
+        }
+
+        /// <summary>
+        /// 高度场位（FlagHeightField）**本轮仍然被明确拒绝**：V1 解码器不认识它的布局，
+        /// 放行会把高度段误读成位图。多层地图的替代路是烘焙层过滤（逐层各烘一份），真高度场列 V2。
+        /// </summary>
+        [Test]
+        public void Decode_HeightFieldFlag_StillRejected_AndNamesLayerFilter()
+        {
+            byte[] b = CloverMapWriter.Encode(Sample());
+            BitConverter.GetBytes((ushort)(CloverMapFormat.FlagWalkable | CloverMapFormat.FlagHeightField))
+                .CopyTo(b, 6);
+
+            Assert.IsFalse(CloverMapFormat.TryDecode(b, out _, out string err), "含高度场段的文件不该被接受");
+            StringAssert.Contains("高度场", err ?? string.Empty);
+            StringAssert.Contains("层过滤", err ?? string.Empty, "拒绝文案应指出「层过滤」这条替代路");
+        }
     }
 }

@@ -157,5 +157,187 @@ namespace CloverEngine
             if (dt <= 0f) { velocity = Vector3.zero; return current; }
             return Vector3.SmoothDamp(current, target, ref velocity, smoothTime, Mathf.Infinity, dt);
         }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // ★ eng-camera-math 片（2026-09-24）：相机的**正交视口 / 屏幕 / 格**换算下沉
+        //
+        // 出处：clover-project-diablo2 的 client/Assets/Scripts/Module/Camera/CameraRig.cs
+        //   里那批 `public static` 纯函数（与题材无关、**算法与分支逐行同源**）。原处已改为
+        //   调用本件（⛔ 不留第二份同名实现）。本片**只下沉这六个**：
+        //     WorldToViewport / WorldToScreen / EdgeScrollOffset / ShakeMagnitude /
+        //     VisibleGridRect / Zoomed。
+        //   ⛔ 仍留在项目侧的（含项目语义，不下沉）：`MapWorldBounds`（等距菱形外接矩形）、
+        //     `ClampFocus`（世界 AABB 口径的对照件）、`DesiredPosition`（机位 z）、
+        //     `CameraPosForFocus/CameraPosForCamera`、`StepFollow` / `ClampForAspect`（单帧 tick 结构）。
+        //
+        // ⛔ **参数化**：屏幕尺寸 / 边距像素 / 等距半格宽高全部由调用方传入 ——
+        //   引擎不持有任何项目常量，也不引任何项目类型（`Iso.HalfW/HalfH` 由调用方给）。
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// 世界坐标 → **视口归一化坐标**（0..1，左下原点）—— 正交、不旋转、沿 +Z 俯视的相机。
+        /// 与 `Camera.WorldToViewportPoint` 同语义（不旋转、世界是 z=0 的 XY 平面 ⇒ 只剩 xy 平移缩放）。
+        ///
+        /// <para><b>为什么需要它（不是重复实现）</b>：`Camera.WorldToScreenPoint` 是**原生调用**，
+        /// 离线自检宿主（`tools/*check`，非 Unity 进程）里用不了 ⇒ 「焦点世界坐标 → 屏幕中心」
+        /// 这条验收断言就永远没法离线自证。本函数把这段换算抽成纯数学，宿主可直接断言。
+        /// 出处 = <c>clover-project-diablo2</c>
+        /// <c>client/Assets/Scripts/Module/Camera/CameraRig.cs</c> 的 <c>WorldToViewport</c>（逐行同源）。</para>
+        ///
+        /// <para><b>退化分支</b>：<paramref name="orthoSize"/> ≤ 0 或 <paramref name="aspect"/> ≤ 0
+        /// ⇒ 返回 <c>NaN</c> 并**只报一次** Warn（返回 NaN 会让断言**明确失败**，
+        /// 比悄悄返回 (0.5,0.5) 假通过安全）。日志走 <see cref="LogThrottle.WarnOnce"/>
+        /// （`Game.Logger` 未装配时静默，与其余引擎件同口径）。</para>
+        /// </summary>
+        /// <param name="world">世界坐标（z 分量被忽略）。</param>
+        /// <param name="camPos">相机世界位置（正交相机 = 视口中心的世界坐标）。</param>
+        /// <param name="orthoSize">正交尺寸（**半高**，世界单位）—— 与 `Camera.orthographicSize` 同口径。</param>
+        /// <param name="aspect">相机宽高比（= `Camera.aspect` = `Screen.width / Screen.height`）。</param>
+        public static Vector2 WorldToViewport(Vector3 world, Vector3 camPos, float orthoSize, float aspect)
+        {
+            if (orthoSize <= 0f || aspect <= 0f)
+            {
+                LogThrottle.WarnOnce("CameraMath", "worldToViewport.badArgs",
+                    $"WorldToViewport 参数非法（orthoSize={orthoSize}, aspect={aspect}）⇒ 返回 NaN（只报一次）");
+                return new Vector2(float.NaN, float.NaN);
+            }
+
+            var halfW = orthoSize * aspect;              // 视口半宽（世界单位）
+            return new Vector2(0.5f + (world.x - camPos.x) / (2f * halfW),
+                               0.5f + (world.y - camPos.y) / (2f * orthoSize));
+        }
+
+        /// <summary>
+        /// 世界坐标 → **屏幕像素坐标**（左下原点）—— 与 `Camera.WorldToScreenPoint` 同语义。
+        /// 由 <see cref="WorldToViewport"/> 乘以屏幕尺寸得到（「焦点 → 屏幕中心」这类断言用它）。
+        /// <para>出处 = <c>clover-project-diablo2</c> <c>Module/Camera/CameraRig.cs</c> 的
+        /// <c>WorldToScreen</c>（逐行同源）。参数非法时沿 <see cref="WorldToViewport"/> 返回 <c>NaN</c>。</para>
+        /// </summary>
+        public static Vector2 WorldToScreen(Vector3 world, Vector3 camPos, float orthoSize, float aspect,
+            float screenW, float screenH)
+        {
+            var v = WorldToViewport(world, camPos, orthoSize, aspect);
+            return new Vector2(v.x * screenW, v.y * screenH);
+        }
+
+        /// <summary>
+        /// 边缘滚动偏移：指针进入 <paramref name="marginPx"/> 边距内时产生**指向屏幕外**的位移，
+        /// 满偏（指针贴到屏幕边）= <paramref name="maxShift"/>；四边各自的**死区**（中间区域）恒 0。
+        /// 屏幕坐标系与 `Game.Input.MousePosition` 一致（**左下角原点**）。
+        ///
+        /// <para>口径：每轴独立，<c>x ≤ margin</c> ⇒ 负方向（左/下），<c>x ≥ W − margin</c> ⇒ 正方向（右/上），
+        /// 幅度按"离边的距离 / 边距"线性（<c>1 − clamp01(dist/margin)</c>）——
+        /// 恰在边界上（<c>dist = margin</c>）幅度为 0 ⇒ 无跳变。</para>
+        ///
+        /// <para>出处 = <c>clover-project-diablo2</c> <c>Module/Camera/CameraRig.cs</c> 的
+        /// <c>EdgeScrollOffset</c>（逐行同源）。退化分支：屏幕尺寸 / 边距 / 满偏任一 ≤ 0 ⇒ 返回 <c>zero</c>
+        /// （取不到 `Screen` 尺寸时调用方不必自己兜底）。</para>
+        /// </summary>
+        /// <param name="pointer">指针屏幕坐标（左下原点）。</param>
+        /// <param name="screenW">屏幕宽（像素）。</param>
+        /// <param name="screenH">屏幕高（像素）。</param>
+        /// <param name="marginPx">触发边距（像素）。</param>
+        /// <param name="maxShift">满偏时的位移（量纲由调用方定：世界单位 / 速度系数皆可）。</param>
+        public static Vector2 EdgeScrollOffset(Vector2 pointer, float screenW, float screenH,
+            float marginPx, float maxShift)
+        {
+            if (screenW <= 0f || screenH <= 0f || marginPx <= 0f || maxShift <= 0f) return Vector2.zero;
+
+            var x = 0f;
+            if (pointer.x <= marginPx) x = -(1f - Mathf.Clamp01(pointer.x / marginPx));
+            else if (pointer.x >= screenW - marginPx) x = 1f - Mathf.Clamp01((screenW - pointer.x) / marginPx);
+
+            var y = 0f;
+            if (pointer.y <= marginPx) y = -(1f - Mathf.Clamp01(pointer.y / marginPx));
+            else if (pointer.y >= screenH - marginPx) y = 1f - Mathf.Clamp01((screenH - pointer.y) / marginPx);
+
+            return new Vector2(x, y) * maxShift;
+        }
+
+        /// <summary>
+        /// 震动偏移的**线性衰减幅度**：<c>t = 0</c> 时 = <paramref name="amplitude"/>，
+        /// <c>t ≥ duration</c> 时 = 0，中间线性；幅度 / 时长 ≤ 0 ⇒ 恒 0。
+        ///
+        /// <para><b>只给幅度、不给方向</b>：方向函数（三角函数 / 随机单位圆 / Perlin）是各项目的镜头手感，
+        /// 由调用方自己乘上去（`clover-project-diablo2` 用的是"角频率 × t 的三角函数"，
+        /// 那条**没有**下沉 —— 它带项目的角频率常量）。</para>
+        ///
+        /// <para>出处 = <c>clover-project-diablo2</c> <c>Module/Camera/CameraRig.cs</c> 的
+        /// <c>ShakeMagnitude</c>（逐行同源）。</para>
+        /// </summary>
+        /// <param name="amplitude">起始幅度（> 0 才有意义）。</param>
+        /// <param name="duration">震动总时长（秒）。</param>
+        /// <param name="t">已经过的时间（秒）。</param>
+        public static float ShakeMagnitude(float amplitude, float duration, float t)
+        {
+            if (amplitude <= 0f || duration <= 0f || t >= duration) return 0f;
+            if (t <= 0f) return amplitude;
+            return amplitude * (1f - t / duration);
+        }
+
+        /// <summary>
+        /// 正交相机视口 → **可见格矩形**（连续格坐标的包围盒，⛔ 不取整）。
+        ///
+        /// <para><b>为什么只看四角</b>：世界→格是**线性**变换（等距投影是线性映射）⇒
+        /// 屏幕矩形映射到格空间后仍是平行四边形，极值必在四个角上 ⇒ 采四角即可，不必逐像素采样。</para>
+        ///
+        /// <para><b>公式（与 <see cref="IsoLayout.WorldToGridContinuous"/> 同一式）</b>：
+        /// <c>u = X / isoHalfW</c>、<c>v = −Y / isoHalfH</c>，<c>gx = (u + v) / 2</c>、<c>gy = (v − u) / 2</c>
+        /// —— 这里没有直接调 <see cref="IsoLayout"/> 是因为它是**实例类**（构造要带排序参数，
+        /// 与几何无关），而本件按「格尺寸参数」的口径给式；离线宿主有等价断言把两者逐点钉住。</para>
+        ///
+        /// <para>出处 = <c>clover-project-diablo2</c> <c>Module/Camera/CameraRig.cs</c> 的
+        /// <c>VisibleGridRect</c>（逐行同源；原处调项目的 <c>Iso.WorldToGridContinuous</c>）。
+        /// 用途举例：量"生产机位在四条边上越界了多少格"（贴边不露虚空）。</para>
+        /// </summary>
+        /// <param name="camX">机位世界 x（正交、不旋转 ⇒ 视口的对称中心）。</param>
+        /// <param name="camY">机位世界 y。</param>
+        /// <param name="halfW">半屏宽（世界单位 = 正交尺寸 × aspect）。</param>
+        /// <param name="halfH">半屏高（世界单位 = 正交尺寸）。</param>
+        /// <param name="isoHalfW">等距半格宽（世界单位；**调用方保证 &gt; 0**，项目侧是常量 1.0）。</param>
+        /// <param name="isoHalfH">等距半格高（世界单位；**调用方保证 &gt; 0**，项目侧是常量 0.5）。</param>
+        /// <param name="loX">**[out]** 可见格矩形的最小 gx（连续坐标）。</param>
+        /// <param name="hiX">**[out]** 最大 gx。</param>
+        /// <param name="loY">**[out]** 最小 gy。</param>
+        /// <param name="hiY">**[out]** 最大 gy。</param>
+        public static void VisibleGridRect(float camX, float camY, float halfW, float halfH,
+            float isoHalfW, float isoHalfH,
+            out float loX, out float hiX, out float loY, out float hiY)
+        {
+            loX = float.MaxValue; hiX = float.MinValue;
+            loY = float.MaxValue; hiY = float.MinValue;
+            for (var i = 0; i < 2; i++)
+            {
+                for (var j = 0; j < 2; j++)
+                {
+                    var u = (camX + (i == 0 ? -halfW : halfW)) / isoHalfW;
+                    var v = -(camY + (j == 0 ? -halfH : halfH)) / isoHalfH;
+                    var gx = (u + v) * 0.5f;
+                    var gy = (v - u) * 0.5f;
+                    if (gx < loX) loX = gx;
+                    if (gx > hiX) hiX = gx;
+                    if (gy < loY) loY = gy;
+                    if (gy > hiY) hiY = gy;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 缩放取值：把 <c>current + delta</c> 钳进 <c>[min, max]</c>（滚轮缩放一步之后该取多少）。
+        ///
+        /// <para>出处 = <c>clover-project-diablo2</c> <c>Module/Camera/CameraRig.cs</c> 的
+        /// <c>Zoomed</c>（逐行同源，就是一次 <c>Mathf.Clamp</c>）。</para>
+        ///
+        /// <para>⚠️ <b>只钳制、不取整 / 不做步进吸附</b>：取整（吸附到某个步长）是**调用方口径**
+        /// ——「步长取多少」是玩法/手感数值、每个项目不同 ⇒ ⛔ 引擎不预设（要就由调用方在返回值上再做）。</para>
+        /// </summary>
+        /// <param name="current">当前值（正交尺寸 / 距离 / 倍率皆可，量纲由调用方定）。</param>
+        /// <param name="delta">本次增量。</param>
+        /// <param name="min">下限。</param>
+        /// <param name="max">上限（<c>min &gt; max</c> 时按 <c>Mathf.Clamp</c> 原语义取 <paramref name="max"/>）。</param>
+        public static float Zoomed(float current, float delta, float min, float max)
+        {
+            return Mathf.Clamp(current + delta, min, max);
+        }
     }
 }

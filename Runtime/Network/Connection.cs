@@ -168,7 +168,9 @@ namespace CloverEngine
 
     /// <summary>
     /// TCP 长连接实现，传输层帧格式：[1B type][4B 大端 len][payload]。
-    /// type 约定：0=数据帧（payload 为客户端帧） 1=ping 2=pong 3=migrate。
+    /// type 约定：0=数据帧（payload 为客户端帧） 1=ping 2=pong。
+    /// （原 3=migrate「连接迁移令牌帧」已随服务端删除 —— 服务端 tcp/codec.go 移除了 frameTypeMigrate，
+    /// 整条迁移链路不可达；类型 3 现在**两端**都按「未知帧类型」处理。）
     /// 单帧 payload 软上限 10MiB、硬上限 10MiB（与服务端一致：TCP/WS/QUIC 统一 10MiB）。
     /// 收发与心跳均由后台线程承担（非阻塞连接 + 15 秒无发送自动 ping + 收 ping 回 pong），
     /// 即使主线程挂起（OnApplicationPause）心跳也不会停发，避免被服务端读超时踢除。
@@ -179,7 +181,6 @@ namespace CloverEngine
         private const byte FrameTypeData = 0;
         private const byte FrameTypePing = 1;
         private const byte FrameTypePong = 2;
-        private const byte FrameTypeMigrate = 3;
 
         /// <summary>
         /// 传输层帧 payload 软上限 **10 MiB**，与服务端一致（TCP/WS/QUIC 统一 10MiB），超出仅告警。
@@ -431,7 +432,7 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 取出一条完整客户端帧（传输层已剥去帧头，且 ping/pong/migrate 不入队）
+        /// 取出一条完整客户端帧（传输层已剥去帧头，且 ping/pong 不入队）
         /// </summary>
         public bool TryTakePacket(out byte[] data)
         {
@@ -494,12 +495,12 @@ namespace CloverEngine
                     var type = ReadByte();
 
                     // 首帧帧头不合法 → 极可能连错了端口。最常见的是把网关 WS 口（8001）当成 TCP 口
-                    // 填给 CloverNet.Init：服务端会回 HTTP 响应，首字节是 'H'/'G'，不是帧类型 0-3。
+                    // 填给 CloverNet.Init：服务端会回 HTTP 响应，首字节是 'H'/'G'，不是帧类型 0-2。
                     // 这里给出明确指向，避免业务只看到「连上 → 秒断」而无从判断。
-                    if (firstFrame && type > FrameTypeMigrate)
+                    if (firstFrame && type > FrameTypePong)
                     {
                         HandleLinkFailure(gen,
-                            $"tcp first byte 0x{type:X2} is not a valid frame type (expect 0-3); " +
+                            $"tcp first byte 0x{type:X2} is not a valid frame type (expect 0-2); " +
                             "the endpoint looks like a WebSocket port — use gateway.listen_tcp (default 8002), " +
                             "or set GameConfig.WsAddr to use the WebSocket line (listen_ws, default 8001)");
                         return;
@@ -534,10 +535,8 @@ namespace CloverEngine
                         case FrameTypePong:
                             // 心跳应答，无需处理
                             break;
-                        case FrameTypeMigrate:
-                            // 会话迁移通知帧，会话恢复由 NetworkManager 的 ResumeSession 流程处理
-                            Game.Logger?.Info("Network", "TCP migrate frame received");
-                            break;
+                        // 原 case FrameTypeMigrate（只打日志、从不发送迁移令牌）已删除：服务端已移除
+                        // frameTypeMigrate，类型 3 现在落到 default 按「未知帧类型」留痕，两端口径一致。
                         default:
                             Game.Logger?.Warn("Network", $"tcp unknown frame type: {type}");
                             break;

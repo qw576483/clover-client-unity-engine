@@ -29,20 +29,28 @@
 com.clover.unity-engine/
 ├── Runtime/
 │   ├── Core/         基础域：Game / Event / Timer / Fsm / Dispatcher / Logger / LogThrottle
-│   │                 / LogBuffer / Setting / Json / DeviceId / Rng / AStar / IsoLayout / Dir8 / Input，
+│   │                 / LogBuffer / Setting / Json / DeviceId / Rng / AStar / IsoLayout / Dir8 / Input
+│   │                 / GridUtil（矩形 → 整数格遍历）/ Screenshot（截图落盘）
+│   │                 / OrderedAsyncResult（乱序异步结果按下标落位）/ EngineRunner + EngineHostOptions（宿主开关），
 │   │                 以及**全部跨模块契约**（含协议载体类型）
 │   ├── Data/         数据域：CloverData / DataTable / Localization / CloverTable（读打表产物）/ FileSlotStore（一槽一文件）
 │   ├── Network/      网络域：Network / WebRequest / WorldSync / CloverAuth / SchemaRegistryManager
 │   │                 / Lan（局域网寻服：UDP 旁路发现，子目录 Runtime/Network/Lan/）
 │   │                 / Quic（msquic 原生互操作，子目录 Runtime/Network/Quic/）
-│   ├── Resource/     资源域：后端抽象 / Resources / AssetBundle / 清单热更与下载器
-│   ├── Presentation/ 表现域：Scene / Entity / ObjectPool / Map（逻辑地图）/ UI / UIWidgets
-│   │                 / TextHooks（通用件文字接管点）/ SpriteAtlas / Animation / Sound / Input / Camera / Quality
+│   ├── Resource/     资源域：后端抽象 / Resources / AssetBundle / 清单热更与下载器 / SpriteSet（批量异步预加载 → 按名同步取）
+│   ├── Presentation/ 表现域：Scene / Entity / ObjectPool / Map（逻辑地图）/ TileWorld（2D 瓦片世界）/ UI / UIWidgets
+│   │                 / TextHooks（通用件文字接管点）/ SpriteAtlas / Animation / SpriteFrameAnimator（帧表 → SpriteRenderer）
+│   │                 / Sound / Input / Camera / Quality
 │   └── Plugins/      原生插件落点（已入库 x86_64/msquic.dll 与 Android arm64-v8a / armeabi-v7a / x86_64 的 libmsquic.so；iOS 待补，QUIC 等原生件落这里）
 ├── Editor/           Editor 横切：Debugger（面板 / GM 控制台 / 网络模拟）
 │                               MapBake（地图烘焙：Unity 关卡 → CloverMap 二进制）
 │                               EditorStartScene（打开编辑器时打开启动场景）
+│                               PixelArtImport（像素素材导入规范 / 导入后处理器）
+│                               PanelPrefabBuilder（一键生成 Resources/UI 面板壳预制体）
 ├── Tests/            Editor（EditMode）+ PlayMode 测试
+│                     （GridUtil / TileWorld / SpriteFrameAnimator / SpriteSet / OrderedAsyncResult /
+│                      EngineHostOptions 有 EditMode 用例，通用件与音效池有 PlayMode 用例；
+│                      **本轮新增用例未实跑**，测试通过与否以本机实跑为准，索引不宣称已通过）
 ├── Samples~/         UPM 示例（LoginFlow）
 ├── Tools~/           工具与说明（`~` 结尾，Unity 不编译）
 └── package.json
@@ -73,7 +81,7 @@ com.clover.unity-engine/
 │              │  Camera      │              │                        │
 │              │  Quality     │              │                        │
 ├──────────────┴──────────────┴──────────────┴────────────────────────┤
-│  Editor 横切：Debugger / MapBake / EditorStartScene（启动场景）     │
+│  Editor 横切：Debugger / MapBake / EditorStartScene / 像素导入 / 面板壳预制体  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -181,6 +189,18 @@ CloverEngine.Presentation  → [Core]
 > 格式契约（逐字节）见 [`clover-server-engine/pkg/domain/mmo/mapdata/README.md`](https://github.com/qw576483/clover-server-engine/blob/main/pkg/domain/mmo/mapdata/README.md)；
 > 导出端是 `Editor/MapBake`。三处实现（写 / 客户端读 / 服务端读）必须同步改。
 
+#### TileWorld（2D 瓦片世界）
+
+2D 平台 / 瓦片关卡的**空间事实面**（实心格位图 + 移动托台的**小数顶高** + 世界边界）；**门面上没有入口**，业务自持实例（与 `Map` 是两套语义，见下）。
+
+| 能力 | 约束 |
+|---|---|
+| 事实查询 | `ITileWorld.IsSolid(tx, ty)`（**越界恒 false**、不抛、不打日志）/ `IsSolidAt(float x, float y)`（世界 → 格**必须** `Mathf.FloorToInt`，`(int)` 强转对负数向零截断 ⇒ "站在坑里也能踩到地"）/ `TryGetCarrierTop(tx, ty, out float topY)`（托台小数顶高；查不到返回 `false` —— 那是正常查询、不是错误分支）/ `MinX` / `MaxX` / `GroundTopY` / `HasBounds` / `SolidCount` / `CarrierCount` |
+| 构建期写入 | `SetSolid(tx, ty, solid = true)` / `Clear()`（只清**格数据**、**不动**边界与地面顶高）/ `SetCarrierTop` / `ClearCarrierTop` / `SetBounds(minX, maxX, groundTopY)`（非有限值忽略 + Error；`minX > maxX` 归一化后交换 + 降频 Warn） |
+| **只回答空间事实，不做位移解算** | 口径与 `Map.cs:14-15` **逐字一致**：「输入 → 位移 → 贴墙滑动」的解算**不在引擎** —— ⛔ 本接口**没有** `Move()` / `Step()` / `Resolve()` 之类方法（用多大半径、几点采样、撞墙是停还是滑都是玩法手感，加了两个项目就会互相打架） |
+| 为什么另起一个接口（不塞进 `IMapData`） | 服务器 `CloverMap V1` 是 **3D MMO 单层平地**（`WalkableAt(x, z)`，一张图一层、高度由地面标量决定）；2D 平台要的是「同一 x 上**多层**格 + 每格可有小数顶高 + 托台会动」⇒ 两套语义不硬塞 |
+| 存储 | 稀疏两个哈希表（`HashSet<long>` 实心 + `Dictionary<long,float>` 托台），键 = `((long)tx << 32) \| (uint)ty`（**双射**，每键 8 字节）；⛔ 不用 32 位异或键 —— 后者在 `\|tx\| ≥ 2^15` 时键碰撞 ⇒ 误判实心（"明明没砖却撞上了"）且不报错（`Runtime/Presentation/TileWorld.cs`；出处见该文件头注释） |
+
 #### Scene（场景管理）
 
 | 能力 | 约束 |
@@ -209,12 +229,13 @@ CloverEngine.Presentation  → [Core]
 | 预加载 | 场景切换前按清单预加载（**与 Scene 加载门控无耦合**，需业务自行保证时序） |
 | 内存水位 | 超水位按 LRU 释放未引用资源 |
 | 同步取值 | `Game.Res.TryGet<T>(path)`：取**已驻留**资源（不触发加载、不阻塞、纯读）；配合 `Preload` 供"必须立刻拿到"的场景 |
+| 精灵集合 `SpriteSet` | 批量异步预加载 → 按名同步取：`LoadSet(paths, onDone)`（逐条走 `Preload`，重复路径由引擎合并）→ `Get(name)`（**纯读缓存**，不触发加载 / 不阻塞主线程）→ 缺失返回 `null` 并**按名字只报一次**（`Get` 每帧都会被调，逐帧刷屏会打爆日志；`Clear()` 后同名会再报一次）；另有 `IsReady`（只表示"流程结束"，**不表示**每张都拿到）/ `Count` / `Clear`。**不持有引用计数**（`Preload` 自己把预热那次 `+1` 还掉）⇒ 条目在水位压力下可被 LRU 淘汰、淘汰后 `Get` 返 `null`；需长期常驻请自行 `Game.Res.LoadAsset` 持有引用（`Runtime/Resource/SpriteSet.cs`；出处与取舍见该文件头注释） |
 
 #### ObjectPool（对象池）
 
 | 池 | 能力 | 约束 |
 |---|---|---|
-| GameObject 池 | Spawn/Despawn（按 prefab key）、预热、容量上限（Trim 裁剪）、**空闲过期回收**（`IdleExpirySeconds`，默认 0 = 关闭）、按场景分组清理 | 战斗内特效/子弹/飘字/角色**一律走池**，禁止裸 `Instantiate` |
+| GameObject 池 | Spawn/Despawn（按 prefab key）、预热、容量上限（Trim 裁剪）、**空闲过期回收**（`IdleExpirySeconds`，默认 0 = 关闭）、按场景分组清理；**代码工厂** `IObjectPool.Register(string key, Func<GameObject> factory)`：`Spawn` / `Preload` 时**工厂优先**，未注册的 key 才回落既有的 `Resources.Load<GameObject>(key)` 预制体路径（用途：代码造的对象也能入池）—— 工厂返回 `null` ⇒ 本次 Spawn 失败 + Error，⛔ 不静默产出空对象；请在首次 `Spawn` 之前一次注册完（例如 Launch 钩子里），建议 key 不与预制体路径重名 | 战斗内特效/子弹/飘字/角色**一律走池**，禁止裸 `Instantiate` |
 | 引用池 | `ReferencePool`：**纯 C# 对象复用**（`Acquire<T>()` / `Release(T)` / `Count<T>()` / `Clear<T>()` / `ClearAll()`；对象可实现 `IReferencePoolable`，在取/还时自动复位）。实现在 `Runtime/Core/EntityPool.cs` | 只复用**托管对象**（输入帧 / 事件参数 / 临时集合）；`GameObject` 一律走上面的 GameObject 池 |
 
 #### UI
@@ -223,8 +244,8 @@ CloverEngine.Presentation  → [Core]
 |---|---|
 | UIManager | 窗口栈、5 层固定层级（Background / Normal / Popup / Top / System）、打开/关闭、Popup 互斥与遮罩；面板继承 `UIPanel` 基类即可，预制体默认放 `Resources/UI/{类名}`（可用 `CloverPresentation.PanelProvider` 换成 Addressables / AB） |
 | 数据绑定 | UI 只订阅数据变更事件刷新，**不直连网络、不改数据** |
-| 通用件 | Toast / 飘字 / Loading / 红点 / 确认框 / 引导遮罩高亮件 / 世界血条 `WorldHpBar`（业务自挂在实体视图根下，引擎未接门面入口）（见 `Runtime/Presentation/UIWidgets.cs`） |
-| 控件工厂 | `UIFactory` 的通用 uGUI 控件（业务"用代码搭 UI"一律用它，别自己再写一套）：水平滑块 `CreateSlider` · 单行输入框 `CreateInputField` · 「◀ 值 ▶」选择行 `CreateSelector` · 开关行 `CreateToggleRow`（句柄类型 `Selector` / `ToggleRow` 也在 `Presentation` 程序集）· 进度条比例 `SetBarWidth`（**锚点宽度**口径，不用空 sprite 的 `fillAmount`）· 布局助手 `Place` / `AnchoredTopLeft` / `AnchoredBottom` / `CreateLabel` / `CreateBoxRect` / `CreateBottomLabel`；**配色 / 文案 / 字号 / 回调一律由参数传入**，引擎不含任何项目取值（见 `Runtime/Presentation/UIWidgetControls.cs`） |
+| 通用件 | Toast / 飘字 / Loading / 红点 / 确认框 / 引导遮罩高亮件 / 世界血条 `WorldHpBar`（业务自挂在实体视图根下，引擎未接门面入口）（见 `Runtime/Presentation/UIWidgets.cs`）。**飘字签名**（契约 `Runtime/Core/PresentationContracts.cs`）：`IUIManager.FloatText(worldPos, text, color = null, duration = 1.2f, riseWorld = 0f, fade = true)` —— `riseWorld = 0`（默认）沿用本次下沉前的"屏幕升距 70 画布单位"（与相机距离无关，旧调用方一个像素都不变），`> 0` 才按**世界单位**沿世界 +Y 投影（投影不出结果时回落屏幕升距 + 限频留痕）；`fade = false` = 全程不透明、到点直接隐藏（复用节点时已复位 alpha） |
+| 控件工厂 | `UIFactory` 的通用 uGUI 控件（业务"用代码搭 UI"一律用它，别自己再写一套）：水平滑块 `CreateSlider` · 单行输入框 `CreateInputField` · 「◀ 值 ▶」选择行 `CreateSelector` · 开关行 `CreateToggleRow`（句柄类型 `Selector` / `ToggleRow` 也在 `Presentation` 程序集）· 进度条比例 `SetBarWidth`（**锚点宽度**口径，不用空 sprite 的 `fillAmount`）· 布局助手 `Place` / `AnchoredTopLeft` / `AnchoredBottom` / `CreateLabel` / `CreateBoxRect` / `CreateBottomLabel` · 引擎署名行 `CreateCreditLabel(parent, font = null, fontSize = 14, bottomOffset = 16f, text = "by clover-engine")`（钉死底部锚点 `anchor/pivot = (0.5, 0)` —— 用左上角锚点 + 大负 y 放底部元素会在 `CanvasScaler` 真实画布高度变小时整块掉到屏幕外；`font == null` 用引擎内置字体并**降频 Warn**：像素 / 点阵字体常只有大写字形，小写会被静默渲染成全大写 `BY CLOVER-ENGINE`，见 `Runtime/Presentation/UIWidgets.cs`）；**配色 / 文案 / 字号 / 回调一律由参数传入**，引擎不含任何项目取值（见 `Runtime/Presentation/UIWidgetControls.cs`） |
 | 适配 | Canvas + CanvasScaler；通用件（Toast / Loading / 确认框）内置安全区适配（`SafeAreaFitter`，internal），**业务面板需自行用 `Screen.safeArea` 处理**（控件工厂只负责摆放，不碰安全区——这条边界不变） |
 
 #### SpriteAtlas（图片）
@@ -240,6 +261,7 @@ CloverEngine.Presentation  → [Core]
 | 能力 | 约束 |
 |---|---|
 | Animator 封装 | 字符串参数方法（SetBool / SetFloat / SetInteger / SetTrigger）、状态切换、归一化时间播放；**参数常量未集中定义**（由业务自行维护常量） |
+| 帧动画 `SpriteFrameAnimator` | 帧表（`Sprite[]`）+ fps → `SpriteRenderer` 的轻量逐帧动画器：`Play(frames, fps, loop = true)` / `PlayOnce(frames, fps, onComplete)` / `Stop()` / `SetFrame(index)` / `Advance(dt)`（**由业务在自己的 Tick 里驱动**：⛔ 无 MonoBehaviour、无协程、不注册回调）/ `FrameIndex` / `IsPlaying`。**不用 `AnimatorController`**：那要求编辑器里编好 State/Clip、回答的是"播哪个 state"（见上一行），而帧序列本来就来自图集（`Game.Res.LoadAll<Sprite>`），天然是"一组 Sprite"；也**不依赖 Addressables**（本类不加载任何资源，帧表由调用方给、谁加载谁 Release）。容错：空帧表 / `fps <= 0` / 运行中换帧表 / `target == null` / 完成回调抛异常 / 单次 `Advance` 步数上限，都有明确口径（降频 Warn，不抛）（`Runtime/Presentation/SpriteFrameAnimator.cs`） |
 | 骨骼动画 | **不在引擎范围**：Spine / DragonBones 由业务自行接入 SDK，引擎不做封装 |
 | 动画事件 | 完成回调已实现；帧事件在业务侧挂 Unity `AnimationEvent` 接收脚本处理 |
 | 技能时间轴 | **引擎不提供**：没有时间轴/帧事件表 API，业务用 `Timer` + 状态机自己编排 |
@@ -249,6 +271,7 @@ CloverEngine.Presentation  → [Core]
 | 能力 | 说明 |
 |---|---|
 | 分组 | BGM / SFX / Voice 三组独立音量，BGM 切换淡入淡出 |
+| 分组静音查询 | `ISoundManager.IsMuted(SoundGroup group)`：读的就是 `SetMute` 写的那张 `_mutes` 表**本身**（**同源状态**，不另存一份）—— 因此读到的值必然等于"下一次播放实际会用的音量是否为 0"；**未设置过的分组返回 `false`**（与 `GetVolume` 未设置时返回 1 同口径：都回答"引擎当前实际生效的值"）（契约 `Runtime/Core/PresentationContracts.cs`，实现 `Runtime/Presentation/Sound.cs`） |
 | AudioSource 池 | 固定挂常驻根（**不随实体回收**），`PlaySFXAt` 只设位置 |
 | 播放闸门 | ① **缺失只报一次**：四处 `clip == null`（`PlayBGM` / `PlaySFX` / `PlaySFXAt` / `PlayVoice`）全走 `LogThrottle.WarnOnce("Sound", "missing:<path>")`，⛔ 不再是"每次调用一条裸 Warn"（高频缺失路径曾把日志刷爆）；② 两个可配闸门（挂在 `ISoundManager` 上，默认 `0` = **不限**）：`MaxPlaysPerFrame`（单帧最多真正起播几次）/ `MaxConcurrentPerClip`（同一路径**同时播放**的音源数上限，真并发口径）；超限**丢弃该次播放**（⛔ 不排队、⛔ 不打断正在播的音源）+ `LogThrottle.WarnThrottled` 限频告警。只作用于 `PlaySFX` / `PlaySFXAt` / `PlayVoice`，**BGM / 分组音量 / 淡入淡出 / `TakeSource` 池逻辑 / `Dispose` 一律不受影响**；阈值由业务下发（如 cs16 的 `CsAudioTuning`）。另：`Sound.cs` 内**已无裸 `Game.Logger?.Warn`** —— `GetAvailableSource` 的池满告警也走 `LogThrottle.WarnOnce("Sound","pool.exhausted")`，池逻辑与 `_poolExhaustedWarned` 原样保留（只换发射通道） |
 | 设置持久化 | **未实现**（音量/静音仅在内存，未写入 Setting） |
@@ -265,7 +288,7 @@ CloverEngine.Presentation  → [Core]
 
 #### Camera
 
-跟随 / 震屏 / 边界约束（`Unfollow` / `SetBounds` 暂无调用方）；**锁定目标、震屏接动画时间轴未实现**。小模块，可选引用。另提供独立组件 `CloverThirdPersonCamera`（3D 第三人称环绕机位 / 遮挡避障 / 贴脸隐藏角色），业务自行挂到相机上，不经 `Game.Camera`。另有相机侧三个**纯件**（能力下沉；同样**不经 `Game.Camera` 门面**，业务自持 / 自传配置）：`ViewBob`（第一人称视点晃动 + 落地沉降，纯逻辑类 + `ViewBobConfig` 七个数值）、`CameraMath`（`FovYFromFovX` 水平→垂直 FOV / `AimDirection` yaw,pitch→视线方向 / `Follow` 指数平滑跟随）、`LookAccumulator`（鼠标位移 → yaw/pitch 累加）。
+跟随 / 震屏 / 边界约束（`Unfollow` / `SetBounds` 暂无调用方）；**锁定目标、震屏接动画时间轴未实现**。小模块，可选引用。另提供独立组件 `CloverThirdPersonCamera`（3D 第三人称环绕机位 / 遮挡避障 / 贴脸隐藏角色），业务自行挂到相机上，不经 `Game.Camera`。另有相机侧三个**纯件**（能力下沉；同样**不经 `Game.Camera` 门面**，业务自持 / 自传配置）：`ViewBob`（第一人称视点晃动 + 落地沉降，纯逻辑类 + `ViewBobConfig` 七个数值）、`CameraMath`（`FovYFromFovX` 水平→垂直 FOV / `AimDirection` yaw,pitch→视线方向 / `Follow` 指数平滑跟随）、`LookAccumulator`（鼠标位移 → yaw/pitch 累加）。另 `ICameraManager.Main`（`Camera Main { get; }`，`Runtime/Core/PresentationContracts.cs:471`）：返回**本 rig 当前驱动的相机**（未就绪返回 null + 降频留痕，调用方**必须判 null**）—— 供业务替代 `Camera.main` 绕门面（后者做一次带 tag 的静态查找，可能拿到另一台相机，症状是"跟随 / 震屏作用于 A、业务算屏幕坐标用的是 B"，UI 与 3D 对不上而两处代码各自看都对）。
 
 #### Quality / DeviceId（画质与设备标识）
 
@@ -301,6 +324,9 @@ CloverEngine.Presentation  → [Core]
 | Logger | 分级日志，文件 + Console 双写 | 文件 `logs/YYYY-MM-DD.log`（根目录无子目录），文件去 ANSI 颜色码 |
 | LogThrottle | 日志降频闸门，**两种口径并存、不可互相替换**：① **时间口径** `ShouldLog(key, intervalSeconds)` / `WarnThrottled` / `ErrorThrottled` / `WarnOnce` / `ErrorOnce`（同 key 在间隔内只出第一条；空 key 恒 false + 只报一次 Warn）；② **计数口径** `ShouldLogEvery(key, everyN)` / `InfoCounted` / `WarnCounted` / `ErrorCounted`（每 key 独立计数，**第 1 次必打**、之后每 N 次一条，行尾补 `（同类第 N 次）`；空 key 归并 `"default"`；`everyN <= 1` 视为 1）。`Reset()` **一并清空两种记录**；可注入 `Clock`（`ClockSource` = Injected / Unity / Process，时钟三级永不抛） | 无对应（客户端防刷屏；高频回调里的非预期分支必须走它） |
 | LogBuffer | 运行时日志**环形缓冲**：最近 N 行**只读窗口**（`Lines` + `Version`）+ 线程安全入队（挂 `Application.logMessageReceivedThreaded`）+ `Install` / `Uninstall` / `Drain` / `Push` / `Clear`（`DefaultCapacity` = 400，超过丢最旧）；补 `ILogger` **只写不读**的缺口 | 无对应（**不是第二套 logger**：只收行 / 不写行，`ILogger` 一行未动） |
+| GridUtil | 矩形 → 整数格遍历（**纯函数 / 无状态**）：`EdgeEpsilon`（= `0.0001f`，右 / 上边收边量，传 0 = 含边界格）/ `TryGetTileRange(Rect, out xMin, out xMax, out yMin, out yMax, epsilon)`（只算格范围，返回 `false` = 不覆盖任何格）/ `ForEach(Rect, Action<int,int>, epsilon)` —— **热路径入口，委托已缓存时不产生任何分配**（lambda 捕获局部变量或方法组转换都会每次分配一个委托 ⇒ 热路径请把委托存进字段）/ `Enumerate(Rect, epsilon)` 迭代器版 —— **每次调用都会分配**，只给冷路径（构建关卡 / 工具 / EditMode 测试）。口径：`FloorToInt`（⛔ 不用 `(int)` 强转，负数向零截断会让坑边半格算进第 0 格）、y 升序外层 / x 升序内层、空 / 反向矩形静默不回调、非有限坐标不回调 + 降频 Error、超大格数（> 1e6）只留痕**不截断**（`Runtime/Core/GridUtil.cs`；逐字收敛项目里 4 份重复实现） | 无对应（客户端通用底座） |
+| Screenshot | `Screenshot.CaptureToFile(string path, int superSize = 1)`：**立即**读像素并写 PNG（父目录不存在自动递归创建）。**调用方负责在帧末调用**（Play 模式 `yield return new WaitForEndOfFrame()` 之后；Editor 菜单 / 自动化脚本直接调）—— 引擎刻意不替调用方排帧末（那会让引擎持有一次业务生命周期，`Game.Shutdown` 时留下悬挂协程）。**永不抛**：空路径 / 屏幕尺寸非法 / 编码失败 / 读写异常一律返回 `false` + `Error` 留痕（静默失败 = 调用方以为存了、磁盘上没有）；`superSize < 1` 按 1 处理并留痕；`superSize > 1` 是**读屏后最近邻放大**（不是渲染层超采样）（`Runtime/Core/Screenshot.cs`） | 无对应 |
+| OrderedAsyncResult\<T\> | 乱序异步结果**按下标落位**（交付顺序恒为下标 0..Count-1）：`Count` / `FilledCount` / `IsComplete` / `Put(index, value)`（越界**忽略**、同一 index 重复**覆盖**，两者均降频 Warn，⛔ 不抛 —— 异步回调路径上抛异常会打断调用方的循环）/ `TryTakeOrdered(out T[] ordered)`（**仅收齐时**返回 `true`，结果按下标升序且**清空自己**可复用；未齐时 `ordered = null` + `false`，⛔ 不交付半成品）；`count <= 0` ⇒ 立即视为 complete、`TryTakeOrdered` 返回空数组 + `true`。用途：并行加载 N 份资源 / 逐帧收集 N 帧结果（帧序不能随回调次序抖动）/ N 个子请求汇总。主线程使用（`Runtime/Core/OrderedAsyncResult.cs`） | 无对应 |
 
 ---
 
@@ -308,6 +334,7 @@ CloverEngine.Presentation  → [Core]
 
 ```text
 Game.Launch(config)   // 初始化核心子系统 + 执行启动钩子（不联网 / 不登录 / 不进场景；配表、资源、网络需另调 CloverData.InitDataTable / CloverRes.Init / CloverNet.Init）
+Game.ConfigureHost(opts) // 宿主开关（EngineHostOptions）：RunInBackground / DuplicateInstanceGuard / OwnAudioListener；**默认全「不干预」**（不调用 = 与既有行为逐字一致）
 Game.Net / Game.Http  // 网络域入口
 Game.Sync             // 世界镜像入口
 Game.LanBrowser       // 局域网寻服入口（CloverLan.Init 挂接；寻服 → 选主机 → 再 CloverNet.Init）
@@ -321,6 +348,11 @@ LogThrottle / LogBuffer  // 静态类，直接 CloverEngine.LogThrottle.X / Clov
 - **流程状态机**：启动 → 热更检查 → 登录 → 主城 → 战斗 … 用 `Fsm` 实现；**与 Scene 模块无内置联动**，切场景由业务在状态回调里调 `Game.Scene.Load`。
 - 引擎自持隐藏 `MonoBehaviour` 宿主驱动 Update，业务无需挂脚本。
 - **每帧驱动**：`Game.Tick` 统一驱动 `Input / Dispatcher / Timer / Fsm / Net / Sync / Res / UI / Anim / Camera / Quality`（`Runtime/Core/Game.cs`）。
+- **宿主开关**：`Game.ConfigureHost(EngineHostOptions)`（`Runtime/Core/EngineRunner.cs`）—— 三项都是"每个新项目都要在自建 Bootstrap 里重写一遍"的宿主级动作，写错的后果都**静默**：
+  `RunInBackground`（`bool?`；`null` = 不干预。跑自动化验证 / 无人值守截图时必须开：编辑器窗口一失焦 `Time.frameCount` 就冻住（实测两分钟走 2 帧），现象是"定时器不触发、流程卡在启动画面"，看起来像状态机坏了）；
+  `DuplicateInstanceGuard`（两个驱动器 = `Game.Tick` 每帧跑两遍，位移 / 计时 / 网络重传全部加倍，且 `Game.Shutdown` 可能被先销毁的那个提前触发 —— **不报任何错**，只表现为"什么都快了一倍 / 抖 / 刚进场景就被关了"）；
+  `OwnAudioListener`（监听器保证在 `DontDestroyOnLoad` 宿主上；挂场景相机会随切场景被销毁，Unity 每帧刷一条 "There are no audio listeners in the scene"，实测把 Editor.log 刷到 74MB；⚠️ **代价**：宿主在原点 ⇒ **3D 空间音效按原点算距离衰减**，`PlaySFXAt` 的远近衰减对玩法有意义的项目**别开这一项**）。
+  生效时机：`RunInBackground` 有值即**立刻**生效（宿主已存在也有效）；另两项是"创建宿主时执行一次"的动作，**必须早于 `Game.Launch`**，宿主已存在时才调用会记一条 Warn（不静默失效）。
 - 生命周期事件（经 `Game.Event` 发布，事件名带 `Net.` 前缀，回调均在主线程）：
   `Net.OnConnected`（连接建立）/ `Net.OnDisconnected`（断开，恢复可用时自动重连）/
   `Net.OnConnectFailed`（从未连上：首次连接失败或地址非法）/
@@ -387,11 +419,39 @@ LogThrottle / LogBuffer  // 静态类，直接 CloverEngine.LogThrottle.X / Clov
 
 ### 5.4 配表代码生成（打表工具，不在引擎内）
 
-客户端引擎的编辑器程序集只有 **Debugger、MapBake 与 EditorStartScene** 三个横切。配表代码生成由仓库的**打表工具**（[`clover-tools/table`](https://github.com/qw576483/clover-tools/blob/main/table/README.md)）负责：
+客户端引擎的编辑器程序集横切共 **5 个**：**Debugger（§5.1）、MapBake（§5.2）、EditorStartScene（§5.3）、PixelArtImport（§5.5）、PanelPrefabBuilder（§5.6）**。
+配表代码生成由仓库的**打表工具**（[`clover-tools/table`](https://github.com/qw576483/clover-tools/blob/main/table/README.md)）负责：
 源表 → tsv + 强类型 C# 代码；生成物禁止手改。
 
 明确**不做代码生成**的部分：`EMsg` 消息号、`Protocol` DTO、动画参数常量、多语言 key ——
 全部**手工维护**，多处（两端）必须保持一致；**不提供 Generator，也不提供自动生号**。
+
+### 5.5 PixelArtImport（像素素材导入规范）
+
+`Clover/像素素材导入/` —— 像素素材的导入规范：PPU / 滤波 = Point / 不压缩 / 无 mipmap / 按"目录 → 轴心"规则表。
+**默认不生效**：开关与配置资产路径存 EditorPrefs、**按工程路径隔离**、默认关；必须用**配置资产**显式开启。
+
+| 入口（`Clover/像素素材导入/`） | 位置 | 说明 |
+|---|---|---|
+| `启用（按配置资产处理导入的纹理）` | `Editor/PixelArtImportPostprocessor.cs`（常量 `MenuEnabled`，勾选项） | 总开关。**关着 / 没选过配置资产 / 资产已失效** ⇒ `ActiveSettings` 返回 null、后处理器什么都不做（"默认不生效"的落地口径）；配置资产取不到时每会话 Warning 一次，不让"开关看着是开的却毫无效果"静默 |
+| `创建或选择配置资产…` | 同上（`MenuPickSettings`） | 创建 / 选中 `PixelArtImportSettings` 资产并登记为当前配置 |
+| `打印配置摘要与自检` | 同上（`MenuReport`） | 只读，不改任何东西 |
+| `用当前配置重导选中纹理` | 同上（`MenuReimportSelection`） | 导入钩子**不会回溯**已导入的素材 ⇒ 改规则后用这条重导 |
+
+配置资产类型 `PixelArtImportSettings`（`Editor/PixelArtImportSettings.cs`）：规则表按"目录前缀 → 轴心"匹配，规则表为空时不处理任何纹理。
+
+### 5.6 PanelPrefabBuilder（面板壳预制体）
+
+`Clover/面板壳预制体/` —— 一键生成面板壳预制体（只有"一个挂好面板组件、**铺满父层**的 RectTransform 根节点"，内容由面板自己在 `OnOpen/Awake` 里搭）。目录固定 `Assets/Resources/UI`（这正是 `UIManager` 默认的查法：按 key `"UI/{类名}"` 取，见 `Runtime/Presentation/UI.cs:134`，换别的目录默认就查不到）。重复执行安全（已存在的同名预制体会被覆盖重建）。
+
+| 入口（`Clover/面板壳预制体/`） | 说明 |
+|---|---|
+| `扫描 IUIPanel 实现并全部生成` | 扫全部 `IUIPanel` 实现，逐个生成 `Resources/UI/{类名}.prefab`；失败的列成清单 |
+| `打印待生成清单（只读）` | 只列清单、不写盘 |
+| `只为选中的面板脚本生成` | 只处理 Project 里选中的脚本 |
+
+⛔ **未改 `CloverPresentation.PanelProvider` 的默认行为**（默认来源仍是 `Resources/UI/{类名}`）。
+存盘**三关校验**（`m_Script` 引用非 0）：存盘前查 `MonoScript`、存盘后回读资产查组件、再读预制体文件文本查 `m_Script: {fileID: 0}` —— 脚本尚未导入时 `SaveAsPrefabAsset` 会把引用写成 0，预制体存在、**编译不报错、运行时组件为 null**（表现是 `Component X not found on prefab`）。
 
 ---
 

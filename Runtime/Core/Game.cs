@@ -408,6 +408,26 @@ namespace CloverEngine
         }
 
         /// <summary>
+        /// 配置**宿主行为**（后台运行 / 重复驱动器守卫 / AudioListener 归属）。
+        /// <para>
+        /// 显式入口，**在 <see cref="Launch"/> 之前调用**最稳妥（部分开关是"创建宿主时执行一次"的动作）。
+        /// 不调用 = 全部沿用引擎现状（<see cref="EngineHostOptions"/> 的字段默认值 = 不干预），
+        /// 因此对既有项目**零影响**。
+        /// </para>
+        /// <para>
+        /// <b>为什么在门面而不是让业务自己写</b>：这三件事每个新项目都要在自建 Bootstrap 里重写一遍
+        /// （<c>Application.runInBackground</c> 必开、跨场景常驻实例只留一份、场景相机随切场景被销毁
+        /// 而 AudioListener 要留）—— 每抄一遍就多一处可能与引擎生命周期冲突的实现。
+        /// 收口到宿主后，业务只给一份开关。
+        /// </para>
+        /// </summary>
+        /// <param name="options">宿主开关；null 视为"全部不干预"（记 Warn 后忽略）。</param>
+        public static void ConfigureHost(EngineHostOptions options)
+        {
+            EngineRunner.Configure(options);
+        }
+
+        /// <summary>
         /// Launch 失败时的回滚：把已建资源与静态门面复位到"未启动"。
         /// <para>回滚本身绝不放任异常逃逸（会掩盖原始失败原因）；每一步单独兜底并留痕。</para>
         /// </summary>

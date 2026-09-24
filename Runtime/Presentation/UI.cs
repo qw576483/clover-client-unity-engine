@@ -294,9 +294,14 @@ namespace CloverEngine
         }
 
         /// <inheritdoc/>
-        public void FloatText(Vector3 worldPos, string text, Color? color = null, float duration = 1.2f)
+        /// <remarks>
+        /// 参数原样透传给 <c>FloatTextLayer</c>（默认值只写在契约上，实现里不重复一份，
+        /// 避免"两份默认值悄悄分歧"）。<c>riseWorld = 0</c> / <c>fade = true</c> 时逐字等于旧行为。
+        /// </remarks>
+        public void FloatText(Vector3 worldPos, string text, Color? color = null, float duration = 1.2f,
+            float riseWorld = 0f, bool fade = true)
         {
-            _floats.Show(worldPos, text, color ?? new Color(1f, 0.92f, 0.4f), duration);
+            _floats.Show(worldPos, text, color ?? new Color(1f, 0.92f, 0.4f), duration, riseWorld, fade);
         }
 
         /// <inheritdoc/>

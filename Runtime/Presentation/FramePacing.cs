@@ -72,7 +72,11 @@ namespace CloverEngine
         /// </summary>
         public static float TryReadRefreshHz()
         {
-            try { return Screen.currentResolution.refreshRateRatio.value; }
+            // ⚠️ 2026-09-23 主 agent 修编译（12 个离线宿主**全部**红的唯一根因：它们都 Compile 本文件）：
+            //    `Screen.currentResolution.refreshRateRatio.value` 是 **double**（`RefreshRate.value`），
+            //    直接 return 到 `float` 签名会 **CS0266 隐式转换失败** ⇒ 整棵树编不过。
+            //    显式 `(float)` 修正，语义零改动（刷新率本身只有整数量级精度，float 完全够）。
+            try { return (float)Screen.currentResolution.refreshRateRatio.value; }
             catch (Exception) { return 0f; }
         }
 

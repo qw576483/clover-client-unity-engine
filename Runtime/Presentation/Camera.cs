@@ -59,10 +59,44 @@ namespace CloverEngine
         }
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// 返回的是本管理器<b>正在驱动的那台相机</b>（<c>_cam</c> = <see cref="Tick"/> 用的同一份缓存），
+        /// 因此与跟随 / 震屏 / 边界约束作用于同一台，不会出现"业务按另一台相机算屏幕坐标"的错位。
+        /// <para>
+        /// 未就绪时返回 null 并经 <see cref="LogThrottle.WarnThrottled"/> **限频留痕**（同 key 5s 一条）：
+        /// 调用方多在每帧路径上，缺失一次就刷一条会把日志打爆，但一次不报又会让"相机没了"
+        /// 表现成静默的坐标错乱 ⇒ 用限频把这个事实留在日志里。
+        /// </para>
+        /// </remarks>
+        public Camera Main
+        {
+            get
+            {
+                RefreshCamera();
+
+                if (_cam == null)
+                {
+                    LogThrottle.WarnThrottled("Camera", "main.missing",
+                        "ICameraManager.Main 取不到相机：场景里没有 tag=MainCamera 且已启用的相机" +
+                        "（进关卡前会返回 null，调用方必须判空；持续出现说明场景生成器漏打 MainCamera 标签）");
+                }
+
+                return _cam;
+            }
+        }
+
+        /// <summary>相机缓存失效（被销毁 / 被禁用）后重新抓一台；正常时零开销。</summary>
+        private void RefreshCamera()
+        {
+            // 不想每帧都走 Camera.main 的静态 tag 查找：只在缓存为空或已失效时重抓。
+            if (_cam == null || !_cam.isActiveAndEnabled) _cam = Camera.main;
+        }
+
+        /// <inheritdoc/>
         public void Tick(float dt)
         {
-            // 相机被销毁 / 被禁用后重新抓一次（不想每帧都走 Camera.main 的静态查找）。
-            if (_cam == null || !_cam.isActiveAndEnabled) _cam = Camera.main;
+            // 相机被销毁 / 被禁用后重新抓一次（与 Main 属性同一套口径，见 RefreshCamera）。
+            RefreshCamera();
             var cam = _cam;
             if (cam == null) return;
 

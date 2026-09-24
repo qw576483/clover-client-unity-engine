@@ -121,7 +121,11 @@ namespace CloverEngine
         {
             if (!Game.IsRunning)
             {
-                Debug.LogError("[Clover.Presentation] 引擎尚未启动，请先调用 Game.Launch(config) 再调用 CloverPresentation.Init()");
+                // 统一走 Game.Logger（未 Launch 时指向 ConsoleLogger，永不为 null），与 CloverNet.Init /
+                // CloverInput.Init / CloverLan 同款守卫：裸 Debug.LogError 与引擎日志格式两张皮、
+                // 且不会被落盘 Logger 接住，线上查不到 Init 调用顺序错误。
+                Game.Logger?.Error("Presentation",
+                    "引擎尚未启动，请先调用 Game.Launch(config) 再调用 CloverPresentation.Init()", null);
                 return;
             }
 

@@ -476,6 +476,18 @@ namespace CloverEngine
         }
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// 读的就是 <see cref="SetMute"/> 写的那张 <c>_mutes</c> 表本身（**同源状态**，不另存一份）：
+        /// 本类里改这张表的地方只有 <see cref="SetMute"/> 与构造函数的初值两处，
+        /// 因此这里读到的值必然等于"下一次播放实际会用的音量是否为 0"。
+        /// 未登记的分组按未静音处理（与 <see cref="GetVolume"/> 未登记返回 1f 同口径）。
+        /// </remarks>
+        public bool IsMuted(SoundGroup group)
+        {
+            return _mutes.TryGetValue(group, out var mute) && mute;
+        }
+
+        /// <inheritdoc/>
         public void Dispose()
         {
             // 先退订应用级事件：不退订的话，Shutdown 之后事件总线若还活着（或被重新 Emit），

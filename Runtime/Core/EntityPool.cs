@@ -105,6 +105,38 @@ namespace CloverEngine
         GameObject Spawn(string key, Transform parent = null, string group = null);
 
         /// <summary>
+        /// 为某个 <paramref name="key"/> 注册一个**代码工厂**：<see cref="Spawn"/> / <see cref="Preload"/>
+        /// 时**优先用工厂造对象**，未注册的 key 才回落既有的 <c>Resources.Load&lt;GameObject&gt;(key)</c> 预制体路径。
+        /// <para>
+        /// <b>为什么要有它</b>：G5 要求"战斗内 GameObject 一律走对象池"，但**代码造出来的对象**
+        /// （子弹 / 碎片 / 敌人 / 地块这类由逻辑 new 出来的）此前无法入池 —— 池只会去 Resources 找预制体，
+        /// 找不到就报错返回 null。于是这些对象只能绕过池裸 <c>Instantiate</c>，既违反 G5、又丢掉了复用。
+        /// 注册工厂后，"怎么造"由业务决定，"什么时候复用 / 什么时候销毁"仍由池统一负责。
+        /// </para>
+        /// <para>
+        /// <b>语义</b>：
+        /// ① 工厂只在**池里没有可复用对象**时被调用（复用路径完全不变）；
+        /// ② 同一 key **重复注册 = 覆盖**（后注册的生效），并留一条 Info 日志；
+        ///    <paramref name="factory"/> 传 <c>null</c> = **注销**该 key（恢复 Resources 回落）并留痕；
+        /// ③ 工厂返回 <c>null</c> ⇒ 本次 Spawn 失败、返回 null、记 Error —— ⛔ **不静默产出空对象**
+        ///    （与预制体缺失同口径：不做"空壳对象掩盖失败"）；
+        /// ④ <see cref="Clear"/> / <see cref="ClearAll"/> 只销毁**对象池内容**，**不注销工厂**
+        ///    （工厂是代码接线，不是池内容；切场景后同一 key 仍该用同一个工厂造）；
+        /// ⑤ 工厂造出的对象与预制体实例**同权**：走同一套复用 / 归还 / 分组 / 空闲过期 / 反向映射。
+        /// </para>
+        /// <para>
+        /// <b>调用时机</b>：注册是纯字典写入，可在任何时刻调用；建议在 <c>Game.Launch</c> 之后、
+        /// 首次 <see cref="Spawn"/> 之前一次注册完（例如 Launch 钩子里）。
+        /// </para>
+        /// </summary>
+        /// <param name="key">池键名，与 <see cref="Spawn"/> 的 key 同一命名空间（建议不与预制体路径重名）。</param>
+        /// <param name="factory">
+        /// 造对象的委托：每次调用都须返回一个**新实例**（池不复用工厂的返回值）。
+        /// 返回 null 视为"造不出"，会被记为 Error（见语义 ③）。
+        /// </param>
+        void Register(string key, Func<GameObject> factory);
+
+        /// <summary>
         /// 将游戏对象回收到对象池中，若不属于已知池则直接销毁。
         /// </summary>
         void Despawn(GameObject obj);

@@ -186,6 +186,77 @@ namespace CloverEngine
             return img;
         }
 
+        // ── 引擎署名行 ─────────────────────────────────────────────────────────
+        /// <summary>署名行的默认宽度（画布单位）：文本短，给足宽度只为避免自动换行，不参与任何配对。</summary>
+        private const float CreditWidth = 600f;
+
+        /// <summary>署名行字体回退的降频 key（只报一次）。</summary>
+        private const string CreditFontKey = "ui.credit.font";
+
+        /// <summary>署名行默认颜色：半透明白，压暗到"看得见但不抢画面"（引擎默认值，业务可读回 <see cref="Text"/> 自行改）。</summary>
+        private static readonly Color CreditColor = new Color(1f, 1f, 1f, 0.55f);
+
+        /// <summary>
+        /// 创建**引擎署名行**（默认文案 <c>by clover-engine</c>）：贴父节点**底部居中**、字号小、颜色低调。
+        /// <para>
+        /// <b>为什么进引擎</b>：每个游戏都必须有这一行（首页画面底部一行 <c>by clover-engine</c>），
+        /// 而"贴底"这个定位反复被写错 —— 用左上角锚点 + 大负 y 去放底部元素时，
+        /// <c>CanvasScaler</c>（match=0.5）的真实画布高度随窗口变化（1600×900 时只有约 972），
+        /// y 一旦超过画布高度元素就**整体掉到屏幕外**（节点 active、文本正确，但一个像素都看不见，
+        /// 只有实机截图才发现）。本方法把定位钉死为底部锚点：
+        /// <c>anchorMin = anchorMax = (0.5, 0)</c> / <c>pivot = (0.5, 0)</c> /
+        /// <c>anchoredPosition.y = bottomOffset</c>，业务一行即可。
+        /// </para>
+        /// <para>
+        /// <b>字体与"静默变全大写"</b>：<paramref name="font"/> 为 <c>null</c> 时用引擎内置字体
+        /// （<see cref="DefaultFont"/>），并**降频 Warn 一次** —— 像素 / 点阵字体常常只有大写字形，
+        /// 小写会被静默渲染成全大写（<c>BY CLOVER-ENGINE</c>），这是真实发生过的事故；
+        /// 而"源码里字符串对"并不等于"画面上文字对"（唯一判据是实机截图）。
+        /// 需要保证小写的项目请显式传入带小写字形的字体。
+        /// </para>
+        /// <para>
+        /// <b>复用</b>：建 Text 一律走 <see cref="CreateText"/>（引擎唯一的 Text 创建点，保证
+        /// <see cref="TextHooks"/> 挂钩不被绕过），贴底一律走 <see cref="AnchoredBottom"/>
+        /// （<see cref="TextAnchor.LowerCenter"/> = 底部居中），本方法不新建第三套定位 / 建文本工具。
+        /// </para>
+        /// </summary>
+        /// <param name="parent">宿主节点（通常是 Canvas 根或某一层）。</param>
+        /// <param name="font">字体；<c>null</c> = 引擎内置字体（会 Warn 一次，见上）。</param>
+        /// <param name="fontSize">字号（默认 14：小而不抢画面）。</param>
+        /// <param name="bottomOffset">离父节点底边的距离（画布单位，正数向上）。</param>
+        /// <param name="text">文案；默认值逐字 = <c>by clover-engine</c>（首字母小写，⛔ 不要改大小写）。</param>
+        /// <returns>创建出的 <see cref="Text"/> 组件（供业务改色 / 改字号 / 断言实际文本与字体）。</returns>
+        public static UnityEngine.UI.Text CreateCreditLabel(
+            UnityEngine.Transform parent,
+            UnityEngine.Font font = null,
+            int fontSize = 14,
+            float bottomOffset = 16f,
+            string text = "by clover-engine")
+        {
+            var label = CreateText("CreditLabel", parent, text, fontSize, TextAnchor.MiddleCenter, CreditColor);
+            // 定位：复用 AnchoredBottom（LowerCenter ⇒ anchorMin = anchorMax = (0.5, 0)、pivot = (0.5, 0)）；
+            // 高度给 fontSize + 10f 只为单行垂直居中，宽度固定只需包住短文本。
+            AnchoredBottom(label.rectTransform, new Vector2(0f, bottomOffset),
+                new Vector2(CreditWidth, fontSize + 10f));
+
+            // 字体必须在 CreateText **之后**写：CreateText 里先落 DefaultFont() 再通知 TextHooks，
+            // 显式传入的字体只有在此处覆盖才会生效（挂钩若把 font 清成 null，说明它自带文字渲染后端，
+            // 本赋值对它无副作用）。
+            label.font = font ?? DefaultFont();
+
+            if (font == null)
+            {
+                // 非预期分支（未指定字体）：像素/点阵字体常只有大写字形 ⇒ 小写会被静默渲染成全大写。
+                // 静默通过比报错更糟（源码字符串逐字正确、画面上却是 BY CLOVER-ENGINE），故必须留痕。
+                LogThrottle.WarnOnce("UI", CreditFontKey,
+                    $"署名行未指定字体，已回落到引擎内置字体（{label.font?.name}）：" +
+                    "像素/点阵字体常只有大写字形，小写会被静默渲染成全大写（BY CLOVER-ENGINE）；" +
+                    "要保证小写请显式传入带小写字形的字体");
+            }
+
+            return label;
+        }
+
         /// <summary>取用于世界坐标 → 屏幕坐标换算的相机（主相机缺失时退到任一启用相机）。</summary>
         public static Camera UICamera()
         {
@@ -333,7 +404,16 @@ namespace CloverEngine
     internal sealed class FloatTextLayer
     {
         private const float DefaultDuration = 1.2f;
+
+        /// <summary>
+        /// **本次下沉前**的上升距离，单位 = 画布局部单位（≈ 参考分辨率下的屏幕像素），与相机距离无关。
+        /// 它同时是契约上 <c>riseWorld = 0</c> 时的默认升距 —— 保留它 = 保留旧行为，
+        /// 旧的调用方（不传新参）一个像素都不会变。
+        /// </summary>
         private const float RiseDistance = 70f;
+
+        /// <summary>世界升距投影失败时的限频日志 key（限频表按 key 分，别用裸 Warn 刷屏）。</summary>
+        private const string RiseFallbackKey = "floattext.rise";
 
         private sealed class Entry
         {
@@ -343,6 +423,10 @@ namespace CloverEngine
             public Vector2 StartPos;
             public float Elapsed;
             public float Duration;
+            /// <summary>本行的升距向量（画布局部单位）：已按世界升距或旧屏幕升距算好，Tick 只管乘 <c>t</c>。</summary>
+            public Vector2 Rise;
+            /// <summary>是否在本行存活期内淡出（false = 全程不透明，到点直接隐藏）。</summary>
+            public bool Fade;
         }
 
         private readonly RectTransform _canvas;
@@ -358,8 +442,19 @@ namespace CloverEngine
             _root.gameObject.AddComponent<SafeAreaFitter>();
         }
 
-        /// <summary>在指定世界坐标弹出一段飘字。</summary>
-        public void Show(Vector3 worldPos, string text, Color color, float duration)
+        /// <summary>
+        /// 在指定世界坐标弹出一段飘字。
+        /// </summary>
+        /// <param name="worldPos">起点（世界坐标）。</param>
+        /// <param name="text">文案；空则忽略（不建节点）。</param>
+        /// <param name="color">文字颜色。</param>
+        /// <param name="duration">存活时长（秒）；&lt;= 0 用 <see cref="DefaultDuration"/>。</param>
+        /// <param name="riseWorld">
+        /// 世界单位升距；<c>0</c> = 沿用旧的屏幕升距（<see cref="RiseDistance"/> 画布单位）。
+        /// </param>
+        /// <param name="fade">是否淡出；<c>false</c> = 全程不透明。</param>
+        public void Show(Vector3 worldPos, string text, Color color, float duration,
+            float riseWorld, bool fade)
         {
             if (string.IsNullOrEmpty(text)) return;
             if (duration <= 0f) duration = DefaultDuration;
@@ -381,10 +476,44 @@ namespace CloverEngine
             entry.Rt.anchoredPosition = local;
             entry.Elapsed = 0f;
             entry.Duration = duration;
+            entry.Rise = ResolveRise(cam, worldPos, local, riseWorld);
+            entry.Fade = fade;
+            // 复用节点时必须复位 alpha：上一次可能是淡出到 0 的（fade = false 时 Tick 不再复写 alpha，
+            // 不复位就会"复用出来一行看不见的字"）。
+            entry.Group.alpha = 1f;
             _live.Add(entry);
         }
 
-        /// <summary>推进上升与淡出。</summary>
+        /// <summary>
+        /// 算本行的升距向量（画布局部单位）。
+        /// <para>
+        /// <paramref name="riseWorld"/> &gt; 0 ⇒ 把"沿世界 +Y 走 riseWorld"这段位移的**起点与终点各投一次**，
+        /// 取画布局部差值：这样相机拉远拉近、画布缩放变化、相机旋转都自动是对的（不是按固定像素折）。
+        /// </para>
+        /// <para>
+        /// 否则（含默认 0）⇒ 旧的屏幕升距：屏幕向上 <see cref="RiseDistance"/> 画布单位（与相机无关）。
+        /// </para>
+        /// </summary>
+        private Vector2 ResolveRise(Camera cam, Vector3 worldPos, Vector2 local, float riseWorld)
+        {
+            var legacy = new Vector2(0f, RiseDistance);
+            if (riseWorld <= 0f) return legacy;
+
+            var topScreen = cam.WorldToScreenPoint(worldPos + Vector3.up * riseWorld);
+            if (topScreen.z >= 0f &&
+                RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    _canvas, new Vector2(topScreen.x, topScreen.y), null, out var topLocal))
+                return topLocal - local;
+
+            // 世界升距投影不出结果（终点落到相机背面 / 画布换算失败）：回落成屏幕升距并**限频留痕** ——
+            // ⛔ 不许静默变成"飘字一动不动"（那看起来像飘字坏了，实际是投影失败）。
+            LogThrottle.WarnThrottled("UI", RiseFallbackKey,
+                $"飘字的世界升距（riseWorld={riseWorld}）投影失败，本行回落为屏幕升距 {RiseDistance}：" +
+                "通常是飘字起点已越过相机背面（相机缺失/在反面由 Show 提前返回，不走到这里）");
+            return legacy;
+        }
+
+        /// <summary>推进上升与淡出（升距/是否淡出逐行取 <see cref="Entry"/> 上的值，见 <see cref="Show"/>）。</summary>
         public void Tick(float dt)
         {
             for (var i = _live.Count - 1; i >= 0; i--)
@@ -392,8 +521,10 @@ namespace CloverEngine
                 var e = _live[i];
                 e.Elapsed += dt;
                 var t = Mathf.Clamp01(e.Elapsed / e.Duration);
-                e.Rt.anchoredPosition = e.StartPos + new Vector2(0f, RiseDistance * t);
-                e.Group.alpha = 1f - t * t;
+                e.Rt.anchoredPosition = e.StartPos + e.Rise * t;
+                // fade = false 时不碰 alpha（保持 Show 里复位的 1f）：到点后 entry 被 SetActive(false)，
+                // 所以"不淡出"不会留下残影。
+                if (e.Fade) e.Group.alpha = 1f - t * t;
                 if (e.Elapsed >= e.Duration)
                 {
                     _live.RemoveAt(i);
@@ -1007,6 +1138,36 @@ namespace CloverEngine
     ///     同一类陷阱的另一种形态。</item>
     /// </list>
     ///
+    /// <h4>① 缺陷（D129b 修）</h4>
+    /// 两个 Quad 的 <see cref="Renderer.sortingOrder"/> 从来没设过 ⇒ 恒为 0。而业务侧的单位/怪物精灵
+    /// 通常在一个远大于 0 的层级上（例：`UnitView.SortingOrder.Unit` = 1000 + 纵深），于是**血条被
+    /// 自己单位的精灵盖住**：血条"时有时无、贴脸才看得见"，且不报任何错。
+    ///
+    /// <h4>② 最小复现</h4>
+    /// 在任意 2D 项目里给一个 <c>sortingOrder = 1000</c> 的 SpriteRenderer 挂一条 `WorldHpBar`
+    /// （其 Quad order = 0），两者屏幕位置重叠时血条不可见；把 <c>sortingOrder</c> 传成 &gt; 1000 即显示。
+    /// 判据 = 运行时读 <c>GetComponentInChildren&lt;WorldHpBar&gt;().transform.GetChild(0)
+    /// .GetComponent&lt;MeshRenderer&gt;().sortingOrder</c>（修复前 0，修复后 = 传入值）。
+    ///
+    /// <h4>③ 为什么是"加参数 + 默认 0"而不是"改默认值"</h4>
+    /// 工作区内还有别的消费方（`clover-project-diablo2` 的 `ViewModule.cs` 用
+    /// <c>WorldHpBar.Create(...)</c> 且不传本参数）⇒ 改默认值会**静默改变它们的渲染顺序**。
+    /// 所以本参数默认 0（= 旧行为，逐位不变），需要"压在单位之上"的项目自己传（首个消费方 =
+    /// `clover-project-cr` 的 `UnitView.cs`，传 `SortingOrder.HpBar` = 2000）。
+    ///
+    /// <h4>④ 已知边界</h4>
+    /// 引擎不知道业务层级表，所以本类只**透传**这个值，不猜。同一实例的 <c>sortingOrder</c> 在
+    /// 幂等复用（`Create` 命中已有实例）时会一起更新（`ApplyParams`），热更/换皮场景不会留旧值。
+    /// 两个 Quad 用**同一个** order：它们的先后由广告牌朝向决定（Fill 的 local z = -0.01 ⇒ 更贴近相机
+    /// ⇒ 后画 ⇒ 盖住 Bg），与修复前一致，不受本改动影响。
+    ///
+    /// <h4>⑤ 用法 / 首个消费方</h4>
+    /// <code>
+    /// var bar = WorldHpBar.Create(viewRoot.transform, tag: "Knight.Hp", sortingOrder: 2000);
+    /// bar.SetHp(60, 60);
+    /// </code>
+    /// 首个消费方：`clover-project-cr/client/Assets/Scripts/View/UnitView.cs`（`SortingOrder.HpBar`）。
+    ///
     /// 用法：
     /// <code>
     /// var bar = WorldHpBar.Create(viewRoot.transform);   // 挂在实体视图根下
@@ -1025,6 +1186,13 @@ namespace CloverEngine
         /// <summary>默认离脚底高度（米）：要能在 1600×900 下一眼看清，0.8 以下会细成一条线。</summary>
         public const float DefaultYOffset = 2.15f;
 
+        /// <summary>
+        /// 默认渲染顺序。**刻意保持 0**（= 修复前行为）：引擎不知道业务的层级表，改默认值会静默改变
+        /// 已有消费方（如 `clover-project-diablo2`）的渲染顺序。需要"压在单位精灵之上"的项目自行传
+        /// （首个消费方 `clover-project-cr` 传 2000，推导见 `UnitView.SortingOrder.HpBar`）。
+        /// </summary>
+        public const int DefaultSortingOrder = 0;
+
         private static readonly Color BgColor = new Color(0.06f, 0.06f, 0.06f, 0.85f);
 
         // 血量分档：绿 → 橙 → 红（一眼看出危险）
@@ -1038,6 +1206,7 @@ namespace CloverEngine
         private MeshRenderer _fillRenderer;
         private float _width = DefaultWidth;
         private float _height = DefaultHeight;
+        private int _sortingOrder = DefaultSortingOrder;
         private float _ratio = 1f;
         private float _hp = 1f;
         private float _maxHp = 1f;
@@ -1053,6 +1222,12 @@ namespace CloverEngine
         /// <summary>最近一次 SetHp 传入的血量上限（未调用过 SetHp 时为 1）。</summary>
         public float MaxHp => _maxHp;
 
+        /// <summary>
+        /// 两个 Quad 的渲染顺序（= <see cref="Create"/> 传入值）。业务侧可用它做**不变量断言**：
+        /// 血条层必须大于自己的单位/怪物精灵层，否则血条会被盖住（修复前恒为 0）。
+        /// </summary>
+        public int SortingOrder => _sortingOrder;
+
         private string _tag = "HpBar";
 
         /// <summary>
@@ -1063,18 +1238,21 @@ namespace CloverEngine
         /// <param name="height">高度（米）</param>
         /// <param name="yOffset">离宿主节点的高度（米）</param>
         /// <param name="tag">日志标签（多套实体用不同标签便于排障）</param>
+        /// <param name="sortingOrder">两个 Quad 的渲染顺序。默认 0 = 旧行为；业务侧单位精灵层级较高时
+        /// 必须传一个更大的值，否则血条会被单位精灵盖住（见类注释「① 缺陷」）。</param>
         public static WorldHpBar Create(Transform target, float width = DefaultWidth,
-            float height = DefaultHeight, float yOffset = DefaultYOffset, string tag = "HpBar")
+            float height = DefaultHeight, float yOffset = DefaultYOffset, string tag = "HpBar",
+            int sortingOrder = DefaultSortingOrder)
         {
             if (target == null) return null;
 
             var existing = target.GetComponentInChildren<WorldHpBar>(true);
             if (existing != null)
             {
-                // 幂等复用，但 width/height/tag 不能静默作废（改了尺寸或标签却"没反应、也无日志"
+                // 幂等复用，但 width/height/tag/sortingOrder 不能静默作废（改了尺寸或标签却"没反应、也无日志"
                 // 是明确的静默失败）：尺寸变化时重建 Quad，标签变化时改名并留痕。
                 existing.SetYOffset(yOffset);
-                existing.ApplyParams(width, height, tag);
+                existing.ApplyParams(width, height, tag, sortingOrder);
                 return existing;
             }
 
@@ -1087,12 +1265,13 @@ namespace CloverEngine
             bar._tag = tag;
             bar._width = width;
             bar._height = height;
+            bar._sortingOrder = sortingOrder;
             bar.Build(width, height);
             return bar;
         }
 
-        /// <summary>对已存在的血条应用新的尺寸 / 标签（供幂等复用的 <see cref="Create"/> 分支使用）。</summary>
-        private void ApplyParams(float width, float height, string tag)
+        /// <summary>对已存在的血条应用新的尺寸 / 标签 / 排序层（供幂等复用的 <see cref="Create"/> 分支使用）。</summary>
+        private void ApplyParams(float width, float height, string tag, int sortingOrder)
         {
             if (width > 0f && height > 0f &&
                 (!Mathf.Approximately(width, _width) || !Mathf.Approximately(height, _height)))
@@ -1104,8 +1283,17 @@ namespace CloverEngine
                 _fill = null;
                 _bgRenderer = null;
                 _fillRenderer = null;
+                _sortingOrder = sortingOrder;
                 Build(_width, _height);
                 Game.Logger?.Info("HpBar", $"血条尺寸已更新：{_width:F2}x{_height:F2}");
+            }
+            else if (sortingOrder != _sortingOrder)
+            {
+                // 尺寸没变但仍要换排序层：直接改两个渲染器（与 Build 同一处行为，避免重建）。
+                _sortingOrder = sortingOrder;
+                if (_bgRenderer != null) _bgRenderer.sortingOrder = _sortingOrder;
+                if (_fillRenderer != null) _fillRenderer.sortingOrder = _sortingOrder;
+                Game.Logger?.Info("HpBar", $"血条排序层已更新：{_sortingOrder}");
             }
 
             if (!string.IsNullOrEmpty(tag) && tag != _tag)
@@ -1118,8 +1306,8 @@ namespace CloverEngine
 
         private void Build(float width, float height)
         {
-            var bg = CreateQuad("Bg", transform, new Vector3(width + 0.04f, height + 0.035f, 1f), Vector3.zero);
-            _fill = CreateQuad("Fill", transform, new Vector3(width, height, 1f), new Vector3(0f, 0f, -0.01f));
+            var bg = CreateQuad("Bg", transform, new Vector3(width + 0.04f, height + 0.035f, 1f), Vector3.zero, _sortingOrder);
+            _fill = CreateQuad("Fill", transform, new Vector3(width, height, 1f), new Vector3(0f, 0f, -0.01f), _sortingOrder);
             _bgRenderer = bg.GetComponent<MeshRenderer>();
             _fillRenderer = _fill.GetComponent<MeshRenderer>();
             AssignMaterial(_bgRenderer, BgColor);
@@ -1144,7 +1332,10 @@ namespace CloverEngine
         /// <summary>显示 / 隐藏（如相机贴脸时隐藏角色视图，血条一起隐藏）。</summary>
         public void SetVisible(bool visible)
         {
-            if (_visible == visible) return;
+            // 早退条件必须**同时**看缓存值与渲染器的实际状态：`Build()`（尺寸变化时重建 Quad）与
+            // 池复用都会让 `_visible` 与 `renderer.enabled` 脱节 —— 只看缓存值时，
+            // "取用同一个池对象后强制显示"会退化成**空操作**，血条永久不显示且不报错。
+            if (_visible == visible && _bgRenderer != null && _bgRenderer.enabled == visible) return;
             _visible = visible;
             // 只切两个 Quad 的渲染器（原实现每次 GetComponentsInChildren 都新分配一个数组，
             // 频繁显隐会在热路径上持续产生 GC）。
@@ -1234,7 +1425,8 @@ namespace CloverEngine
                 mr.sharedMaterial = mat;
         }
 
-        private static Transform CreateQuad(string name, Transform parent, Vector3 scale, Vector3 localPos)
+        private static Transform CreateQuad(string name, Transform parent, Vector3 scale, Vector3 localPos,
+            int sortingOrder)
         {
             var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
             go.name = name;
@@ -1249,6 +1441,9 @@ namespace CloverEngine
             var mr = go.GetComponent<MeshRenderer>();
             if (mr != null)
             {
+                // ★ 必须显式写 sortingOrder：Quad 的 MeshRenderer 默认 0，而业务侧单位精灵常在高层级
+                //   （例：本项目 1000+）⇒ 血条会被单位盖住（见类注释「① 缺陷」）。
+                mr.sortingOrder = sortingOrder;
                 mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 mr.receiveShadows = false;
             }

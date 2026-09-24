@@ -69,6 +69,20 @@ namespace CloverEngine
         /// <summary>可靠发送队列的帧数上限（背压）：发送线程落后时拒绝新帧而不是无界堆积内存。</summary>
         private const int MaxSendQueueFrames = 256;
 
+        /// <summary>
+        /// 各收发队列允许积压的最大帧数（背压上限）。口径与 <see cref="TcpConnection"/> /
+        /// WebSocketConnection 一致（同为 4096，超限丢**最旧** + 降频告警；**不要另立第二套数值**）。
+        /// 覆盖三条队列：接收队列（可靠流帧与 Datagram **共用**）、出站 Datagram 队列 ——
+        /// 主线程 Tick 停顿或链路半死时，对端/业务发多快就积多快。
+        /// </summary>
+        private const int MaxQueuedFrames = 4096;
+
+        /// <summary>接收队列丢弃累计次数，用于把告警降频（第 1 次与每 64 次打印）。</summary>
+        private int _recvQueueDropCount;
+
+        /// <summary>出站 Datagram 队列丢弃累计次数（与接收队列各一份，避免互相压制降频）。</summary>
+        private int _datagramQueueDropCount;
+
         private readonly ConcurrentQueue<byte[]> _recvQueue = new();
         private readonly ConcurrentQueue<byte[]> _sendQueue = new();
         private readonly ConcurrentQueue<byte[]> _datagramQueue = new();
@@ -339,7 +353,10 @@ namespace CloverEngine
 
             var payload = new byte[count];
             Buffer.BlockCopy(data, offset, payload, 0, count);
-            _datagramQueue.Enqueue(payload);
+            // 背压（见 MaxQueuedFrames）：出站 Datagram 与接收队列共用同一个 EnqueueBounded，超限丢**最旧**。
+            // Datagram 本就是不可靠通道，丢旧帧等价于拥塞下的自然丢失；但仍必须留痕降频，
+            // 否则业务只看到「发了却没到」而无从判断是丢了还是没发。
+            EnqueueBounded(_datagramQueue, payload, "datagram send", ref _datagramQueueDropCount);
             SignalSend();
         }
 
@@ -352,6 +369,34 @@ namespace CloverEngine
         public bool TryTakePacket(out byte[] data)
         {
             return _recvQueue.TryDequeue(out data);
+        }
+
+        /// <summary>
+        /// 入队并施加背压（见 <see cref="MaxQueuedFrames"/>）：超出上限时丢弃**最旧**的帧。
+        /// 丢弃必须留痕且降频，否则现场只表现为「莫名少收/少发消息」。与 <see cref="TcpConnection"/>
+        /// 的 EnqueueBounded 同款（口径统一，勿另写一套）。可在 msquic 回调线程调用（队列与计数均线程安全）。
+        /// 接收队列（可靠流帧与 Datagram 共用）与**出站 Datagram 队列**共用本方法，只有
+        /// <paramref name="what"/> 与计数器不同 —— 不要再写第三份队列实现。
+        /// </summary>
+        /// <param name="queue">目标队列（接收 / 出站 Datagram）。</param>
+        /// <param name="frame">待入队帧。</param>
+        /// <param name="what">日志中的队列名（<c>recv</c> / <c>datagram send</c>）。</param>
+        /// <param name="dropCount">该队列自己的丢弃累计计数（各队列各一份，避免互相压制降频）。</param>
+        private void EnqueueBounded(ConcurrentQueue<byte[]> queue, byte[] frame, string what, ref int dropCount)
+        {
+            queue.Enqueue(frame);
+            var dropped = 0;
+            while (queue.Count > MaxQueuedFrames && queue.TryDequeue(out _))
+                dropped++;
+            if (dropped == 0)
+                return;
+            var total = Interlocked.Add(ref dropCount, dropped);
+            if (total == dropped || total % 64 < dropped)
+            {
+                Game.Logger?.Warn("Quic",
+                    $"quic {what} queue exceeded {MaxQueuedFrames} frames, dropped {dropped} oldest (total={total}) — " +
+                    "链路积压：检查主线程 Tick 是否被阻塞或对端是否停止读取");
+            }
         }
 
         // ------------------------------------------------------------------ msquic 回调（msquic 工作线程）
@@ -431,7 +476,7 @@ namespace CloverEngine
                         // Datagram 是**不可靠**通道：拿到的报文即一整帧（没有长度前缀）。
                         var payload = CopyBuffer(evt.DatagramBufferPtr);
                         if (payload != null && payload.Length > 0)
-                            _recvQueue.Enqueue(payload);
+                            EnqueueBounded(_recvQueue, payload, "recv", ref _recvQueueDropCount);
                         break;
                     }
 
@@ -777,7 +822,7 @@ namespace CloverEngine
                     Game.Logger?.Info("Quic", $"recv frame len={frame.Length}（首帧诊断，剩余 {_recvLogBudget} 条）");
                 }
 
-                _recvQueue.Enqueue(frame);
+                EnqueueBounded(_recvQueue, frame, "recv", ref _recvQueueDropCount);
             }
         }
 

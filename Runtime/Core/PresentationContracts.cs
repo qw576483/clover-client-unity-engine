@@ -81,7 +81,38 @@ namespace CloverEngine
         /// 在指定世界坐标冒一段飘字（伤害数字 / 获得物品），向上飘并淡出。
         /// <paramref name="color"/> 传 null 用默认金色；目标在相机背面时不显示。
         /// </summary>
-        void FloatText(Vector3 worldPos, string text, Color? color = null, float duration = 1.2f);
+        /// <param name="worldPos">飘字起点（世界坐标）。</param>
+        /// <param name="text">文案；空字符串直接忽略（不产生节点）。</param>
+        /// <param name="color">文字颜色；null = 默认金色。</param>
+        /// <param name="duration">存活时长（秒）；&lt;= 0 时按实现默认值 1.2s。</param>
+        /// <param name="riseWorld">
+        /// 升距，单位 = <b>世界单位</b>（沿世界 +Y 方向的位移，由相机投影换算成屏幕位移）。
+        /// <para>
+        /// <c>0</c>（默认）= <b>沿用本次下沉前的屏幕升距</b>（屏幕向上 70 画布单位，与相机距离无关）
+        /// —— 默认值下与旧行为逐字一致。
+        /// </para>
+        /// <para>
+        /// 为什么要有它：这类飘字的上移距离在**原版里是关卡尺度意义上的**（"上移 3 格"），
+        /// 而按屏幕像素升是"相机拉远拉近都一样高"，与关卡尺度对不上。
+        /// </para>
+        /// <para>
+        /// 为什么单位不是"格"：格 → 世界单位的换算（1 格 = 多少单位）属各项目的关卡尺度，
+        /// 引擎不含任何项目数值（结构规则 §3.1），换算由调用方自己做。
+        /// </para>
+        /// <para>
+        /// 边界：世界升距投影不出结果时（目标点落在相机背面）回落成屏幕升距并**限频留痕**，
+        /// 不会静默变成"飘字不动"。
+        /// </para>
+        /// </param>
+        /// <param name="fade">
+        /// 是否在存活期内淡出。<b>默认 <c>true</c> = 本次下沉前的行为</b>（alpha 按 <c>1 - t²</c> 递减）。
+        /// 传 <c>false</c> = 全程不透明，到点直接隐藏（复用节点时已复位 alpha，不留残影）。
+        /// <para>
+        /// 用于"原版不淡出"的飘字（例如分数飘字：0.5s 直线上升、动画剪辑里没有 alpha 曲线）。
+        /// </para>
+        /// </param>
+        void FloatText(Vector3 worldPos, string text, Color? color = null, float duration = 1.2f,
+            float riseWorld = 0f, bool fade = true);
 
         /// <summary>
         /// 显示全屏 Loading（半透明遮罩 + 旋转指示 + 文案）。
@@ -390,6 +421,23 @@ namespace CloverEngine
         void SetMute(SoundGroup group, bool mute);
 
         /// <summary>
+        /// 查询指定音频分组当前是否静音。
+        /// <para>
+        /// <b>与 <see cref="SetMute"/> 同源</b>：读的是引擎实现内部那份静音表本身，
+        /// 不是第二份记账。为什么必须同源 —— 业务侧自己记一个 <c>_muted</c> 字段时，
+        /// 只要有任何一条路径不经过它（切 BGM、暂停恢复、设置面板直接调 <see cref="SetMute"/>），
+        /// 两份状态就会漂移，表现为"显示已静音但还有声音"这种不可诊断的错位。
+        /// </para>
+        /// <para>
+        /// 未设置过的分组返回 <c>false</c>（与 <see cref="GetVolume"/> 未设置时返回 1 同口径：
+        /// 都回答"引擎当前实际生效的值"）。
+        /// </para>
+        /// </summary>
+        /// <param name="group">音频分组</param>
+        /// <returns>该分组当前是否静音。</returns>
+        bool IsMuted(SoundGroup group);
+
+        /// <summary>
         /// 释放音频管理器资源
         /// </summary>
         void Dispose();
@@ -402,6 +450,26 @@ namespace CloverEngine
     /// </summary>
     public interface ICameraManager
     {
+        /// <summary>
+        /// 引擎 rig 当前驱动的那个相机；未就绪时为 <c>null</c>（<b>不抛异常、不返回假相机</b>）。
+        /// <para>
+        /// <b>语义</b>：返回值与 <see cref="Follow"/> / <see cref="Shake"/> / <see cref="SetBounds"/>
+        /// 作用于**同一台**相机（本管理器内部缓存的那个），随"相机被销毁 / 被禁用"自动重抓。
+        /// </para>
+        /// <para>
+        /// <b>为什么要有它</b>：业务侧拿 <c>Camera.main</c> 是**绕过门面** —— 它做一次带 tag 的静态查找，
+        /// 拿到的可能是另一台相机（场景里第二台 / 未受本管理器驱动的那台），于是"跟随 / 震屏作用于 A、
+        /// 业务算屏幕坐标用的是 B"，症状是 UI 与 3D 对不上，而两处代码各自看都对。
+        /// </para>
+        /// <para>
+        /// <b>为什么要降频留痕</b>：未就绪（场景里没有 tag=MainCamera 且已启用的相机）时返回 null，
+        /// 而调用方多在每帧路径上 —— 每次一条 Warn 会把日志刷爆，一次不报又会让"相机没了"变成
+        /// 静默的表现错乱。故缺失经 <c>LogThrottle.WarnThrottled</c> 留痕（同一 key 默认 5s 一条）。
+        /// </para>
+        /// <para>调用方**必须判 null**（G9）：本属性可能在任何时刻返回 null（切场景的空窗期）。</para>
+        /// </summary>
+        Camera Main { get; }
+
         /// <summary>
         /// 让主相机平滑跟随指定目标
         /// </summary>

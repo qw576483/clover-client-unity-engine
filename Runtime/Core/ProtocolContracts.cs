@@ -57,7 +57,15 @@ namespace CloverEngine
     }
 
     /// <summary>
-    /// 帧同步房间通用回包，字段与业务侧 def 包（<c>game/def/reply.go</c>，不在本仓库）的 FrameRoomReply 逐字对齐。
+    /// 帧同步房间通用回包（**客户端侧单边定义**）。
+    ///
+    /// 回包没有消息号（帧 msgID 恒为 0，按 requestID 配对），因此载体类型由**各游戏业务侧的 def 包**
+    /// 自行定义 —— 服务端引擎（clover-server-engine）**不导出** FrameRoomReply / FrameRoomJoinReply
+    /// （引擎只提供 <c>pkg/domain/room</c> 的房间能力 API）。本类是客户端为
+    /// <see cref="IFrameRoom"/> 各方法提供返回类型用的本地副本，**json 键须与所用业务 def 包的同名结构一致**。
+    /// 字段形状的参考示例见引擎文档 <c>clover-doc/server/examples/room.md</c>（那里定义在
+    /// <c>game/def/frame.go</c>，为 {OK, RoomID, NodeAddr, Message}；本类另含 summary / err，
+    /// 以所用业务 def 的实际 json tag 为准，不要假设是逐字对齐）。
     /// 被 <see cref="IFrameRoom"/> 的多个方法作为返回类型使用，故定义在 Core。
     /// </summary>
     [Serializable]
@@ -83,9 +91,10 @@ namespace CloverEngine
     }
 
     /// <summary>
-    /// 加入帧同步房间回包（含跨节点接管信息），字段与业务侧 def 包（<c>def/reply.go</c>，不在本仓库）的
-    /// FrameRoomJoinReply 对齐。被 <see cref="IFrameRoom.JoinRoomAsync"/> 作为返回类型使用，故定义在 Core。
-    /// 注意：服务端还有 takeover_recovery（any，动态 JSON），JsonUtility 无法表达，
+    /// 加入帧同步房间回包（含跨节点接管信息），同为**客户端侧单边定义**（服务端引擎无此类型，
+    /// 字段须与所用业务 def 包的同名结构一致；参考示例见 <c>clover-doc/server/examples/room.md</c>
+    /// 的 <c>game/def/frame.go</c>）。被 <see cref="IFrameRoom.JoinRoomAsync"/> 作为返回类型使用，故定义在 Core。
+    /// 注意：业务 def 包通常还有 takeover_recovery（any，动态 JSON），JsonUtility 无法表达，
     /// 需要时对原始 body 走 MiniJson（ctx.Body）。
     /// </summary>
     [Serializable]

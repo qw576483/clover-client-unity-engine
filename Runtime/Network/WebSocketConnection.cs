@@ -44,6 +44,17 @@ namespace CloverEngine
         /// <summary>接收缓冲块大小（单块，跨块由累加器拼接）。</summary>
         private const int RecvChunkSize = 16 * 1024;
 
+        /// <summary>
+        /// 收发队列各自允许积压的最大帧数（背压上限）。口径与 <see cref="TcpConnection"/> 完全一致
+        /// （那里的 MaxQueuedFrames 也是 4096，**不要另立第二套数值**）：无界队列在「主线程 Tick
+        /// 长时间停顿」或「链路半死但仍在 Enqueue」时会持续吃内存。超过上限即丢弃**最旧**的帧并
+        /// 降频告警 —— 保留最新的帧更接近当前状态，被积压的旧帧在这种场景下基本已过期。
+        /// </summary>
+        private const int MaxQueuedFrames = 4096;
+
+        /// <summary>队列丢弃累计次数，用于把告警降频（只在第 1 次与每 64 次时打印）。</summary>
+        private int _queueDropCount;
+
         private ClientWebSocket _ws;
         private Thread _recvThread;
         private Thread _sendThread;
@@ -208,7 +219,7 @@ namespace CloverEngine
 
             var payload = new byte[count];
             Buffer.BlockCopy(data, offset, payload, 0, count);
-            _sendQueue.Enqueue(payload);
+            EnqueueBounded(_sendQueue, payload, "send");
             SignalSend();
         }
 
@@ -222,6 +233,28 @@ namespace CloverEngine
         public bool TryTakePacket(out byte[] data)
         {
             return _recvQueue.TryDequeue(out data);
+        }
+
+        /// <summary>
+        /// 入队并施加背压（见 <see cref="MaxQueuedFrames"/>）：超出上限时丢弃**最旧**的帧。
+        /// 丢弃必须留痕且降频，否则现场只表现为「莫名少收到消息」，无从判断是丢了还是没发。
+        /// 与 <see cref="TcpConnection"/> 的 EnqueueBounded 同款（口径统一，勿另写一套）。
+        /// </summary>
+        private void EnqueueBounded(ConcurrentQueue<byte[]> queue, byte[] frame, string what)
+        {
+            queue.Enqueue(frame);
+            var dropped = 0;
+            while (queue.Count > MaxQueuedFrames && queue.TryDequeue(out _))
+                dropped++;
+            if (dropped == 0)
+                return;
+            var total = Interlocked.Add(ref _queueDropCount, dropped);
+            if (total == dropped || total % 64 < dropped)
+            {
+                Game.Logger?.Warn("Network",
+                    $"ws {what} queue exceeded {MaxQueuedFrames} frames, dropped {dropped} oldest (total={total}) — " +
+                    "链路积压：检查主线程 Tick 是否被阻塞或对端是否停止读取");
+            }
         }
 
         /// <summary>关闭连接并清空收发队列（不动代际与回调标记）。</summary>
@@ -347,7 +380,7 @@ namespace CloverEngine
                         Game.Logger?.Warn("Network", $"ws message exceeds soft limit: {message.Length}");
 
                     if (_generation == gen)
-                        _recvQueue.Enqueue(message);
+                        EnqueueBounded(_recvQueue, message, "recv");
                 }
             }
             finally

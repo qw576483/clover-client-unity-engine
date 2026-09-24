@@ -11,6 +11,17 @@ namespace CloverEngine
     {
         private readonly Dictionary<string, PoolData> _pools = new();
         private readonly Dictionary<GameObject, string> _reverseMap = new();
+
+        /// <summary>
+        /// 代码工厂表（`IObjectPool.Register` 的落点）：key → 造对象的委托。
+        /// <para>
+        /// **与 `_pools` 分开存**：工厂是"怎么造"的接线，与"造出来多少实例"无关 ——
+        /// <see cref="Clear"/> / <see cref="ClearAll"/> 只清池内容，不清这张表
+        /// （切场景后同一个 key 仍该用同一个工厂造）。
+        /// </para>
+        /// </summary>
+        private readonly Dictionary<string, Func<GameObject>> _factories = new();
+
         private Transform _root;
         private const int DefaultCapacity = 64;
 
@@ -97,6 +108,36 @@ namespace CloverEngine
                 }
                 return _root;
             }
+        }
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// 重复注册 = 覆盖（后注册的生效）+ Info 留痕；传 null 工厂 = 注销该 key + Info 留痕。
+        /// 「传 null 当注销」是**刻意**的：把 null 存进表里会让 <see cref="Spawn"/> 在运行时
+        /// 抛 NullReferenceException（一个远离注册点的崩溃），不如在这里给出明确语义。
+        /// </remarks>
+        public void Register(string key, Func<GameObject> factory)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                // 空 key 与任何 Spawn 的 key 都对不上：注册了也永远不会命中，明确报错比静默丢弃好排查。
+                Game.Logger?.Error("ObjectPool", "Register 收到空 key，已忽略（空 key 无法与 Spawn 的 key 匹配）");
+                return;
+            }
+
+            if (factory == null)
+            {
+                if (_factories.Remove(key))
+                    Game.Logger?.Info("ObjectPool", $"池 {key} 的代码工厂已注销，该 key 回落 Resources 预制体路径");
+                else
+                    Game.Logger?.Warn("ObjectPool", $"注销 {key} 的代码工厂失败：该 key 没有注册过工厂（已忽略）");
+                return;
+            }
+
+            if (_factories.ContainsKey(key))
+                Game.Logger?.Info("ObjectPool", $"池 {key} 的代码工厂被重复注册，已覆盖为新的工厂");
+
+            _factories[key] = factory;
         }
 
         /// <summary>
@@ -344,8 +385,42 @@ namespace CloverEngine
             return _pools.TryGetValue(key, out var pool) ? pool.Inactive.Count : 0;
         }
 
+        /// <summary>
+        /// 造一个新实例：**注册过工厂的 key 一律走工厂**（代码造的对象也能入池，G5），
+        /// 未注册的 key 才回落既有的 <c>Resources.Load</c> 预制体路径（老行为一字未改）。
+        /// <para>
+        /// 工厂路径与预制体路径的执行顺序一致：先造、再挂父、再改名；两者都遵守"造不出就返回 null
+        /// 并记 Error"（⛔ 不返回空壳对象 —— 那会让"预制体缺失/工厂写坏"变成静默的表现缺失）。
+        /// </para>
+        /// </summary>
         private GameObject CreateInstance(string key, Transform parent)
         {
+            if (_factories.TryGetValue(key, out var factory))
+            {
+                if (factory == null)
+                {
+                    // 表里存着 null（正常注册路径进不来，只有外部反射/序列化等异常途径）：
+                    // 明确报错并返回 null，不静默换来源（换来源会让"为什么这批对象长得不一样"无法定位）。
+                    Game.Logger?.Error("ObjectPool",
+                        $"池 {key} 的代码工厂为 null，本次 Spawn 失败（该 key 已被注册过工厂，不会再回落 Resources）");
+                    return null;
+                }
+
+                var made = factory();
+                if (made == null)
+                {
+                    // 工厂返回 null = 造不出：与"预制体找不到"同口径，报错并放弃本次 Spawn。
+                    Game.Logger?.Error("ObjectPool",
+                        $"池 {key} 的代码工厂返回 null，本次 Spawn 失败：工厂必须返回一个已实例化的 GameObject");
+                    return null;
+                }
+
+                // worldPositionStays=false：与预制体路径（Instantiate(prefab, parent)）的挂父语义一致。
+                if (parent != null) made.transform.SetParent(parent, false);
+                made.name = key;   // 与预制体路径同名：池内对象按 key 命名，排障时能一眼看出它属于哪个池
+                return made;
+            }
+
             var prefab = Resources.Load<GameObject>(key);
             if (prefab == null)
             {

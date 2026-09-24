@@ -44,8 +44,8 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 读取诊断开关环境变量。WebGL 没有进程环境变量（浏览器沙箱），直接取默认值（关）——
-        /// 旧实现无平台分支，WebGL 上这些开关恒失效（且不该假设 GetEnvironmentVariable 总有意义）。
+        /// 读取诊断开关环境变量。WebGL 没有进程环境变量（浏览器沙箱），直接取默认值（关）
+        /// —— 且不该假设 GetEnvironmentVariable 总有意义。
         /// </summary>
         private static bool ReadEnvFlag(string name)
         {

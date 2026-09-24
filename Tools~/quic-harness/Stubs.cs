@@ -31,12 +31,11 @@ namespace CloverEngine
         WebSocket = 1,
         RawUdp = 2,
         Quic = 3,
-        // 与原枚举保持一致：WebTransport = 4 已删除（客户端从未实现，属死枚举值）。
+        // 与原枚举保持一致：WebTransport = 4 不列入（客户端从未实现，属死枚举值）。
     }
 
-    // 注：ConnectionState / BigEndian / ClientFrame 不再在此声明 —— QuicHarness.csproj 直接链接了
-    // 引擎真实源码（Connection.cs），这三样由它提供。旧版在 Stubs 里复制 ClientFrame = 两份代码漂移
-    // （帧头布局一改，试验台仍按旧格式跑通），已删除副本。
+    // 注：ConnectionState / BigEndian / ClientFrame 不在此声明 —— QuicHarness.csproj 直接链接了
+    // 引擎真实源码（Connection.cs），这三样由它提供。
 
     /// <summary>可靠通道契约（引擎里在 Transport.cs；试验台只用 QuicConnection 实现它）。</summary>
     public interface ITransportConnection
@@ -70,8 +69,7 @@ namespace CloverEngine
     internal sealed class ConsoleHarnessLogger : IHarnessLogger
     {
         // ⚠️ 每条都 Flush：进程被原生断言打死时，**stdout 缓冲会整体丢失**，
-        // 于是"最后一条日志"看起来像是崩溃点，其实是假象（本轮真踩过：
-        // 因为没 flush，我一度以为崩在 ConnectionShutdown 之后，实际崩点更靠后）。
+        // 于是"最后一条日志"看起来像是崩溃点，其实只是缓冲丢失造成的假象。
         private static void Line(string level, string tag, string msg)
         {
             Console.WriteLine($"[{level}][{tag}] {msg}");

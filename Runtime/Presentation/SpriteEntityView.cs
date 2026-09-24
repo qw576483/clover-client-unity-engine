@@ -6,10 +6,7 @@
 // ⛔ ★ 缺陷（本件补的就是它）：引擎的实体视图骨架此前**只有 3D 一条路**
 //   （`Runtime/Presentation/Entity.cs` 的 `EntityViewFactory`：3D 模型 + `AnimatorController`），
 //   2D 精灵项目拿不到「建 / 绑 / 销」骨架 ⇒ 只能自建第二套实体视图生命周期。
-//   ★ 影响范围：所有 2D / 像素风项目。实测参考（`clover-project-diablo2`）：
-//     `Module/View/ViewModule.cs:1296 EnsureRoot` / `:1444 CreateEntityNode` /
-//     `:1716 DestroyView` / `:1694 RefreshAllFrames`（异步贴图到位后全量重铺 + 换装重播）
-//     就是在复刻这套流程；`Module/View/EntityView.cs` / `EntityHighlight.cs` 叠在其上。
+//   ★ 影响范围：所有 2D / 像素风项目。
 //   本件把 2D 那条路补进引擎，经 `EntityViewFactory` 的**视图来源接缝**接管
 //   （契约 = `IEntityViewSource`，见 `Runtime/Presentation/Entity.cs`），业务不再自建。
 //
@@ -50,7 +47,7 @@ namespace CloverEngine
     /// 2D 精灵实体视图来源（<see cref="IEntityViewSource"/> 的 2D 实现）。
     ///
     /// <para>
-    /// <b>用法 + 首个消费方</b>（接线在收尾片做）：
+    /// <b>用法</b>：
     /// <code>
     /// // ① 纯 2D 项目：注册成默认来源 ⇒ 本项目全部实体走精灵视图
     /// CloverPresentation.EntityView.RegisterSource(

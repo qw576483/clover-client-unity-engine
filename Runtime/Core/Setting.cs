@@ -36,7 +36,7 @@ namespace CloverEngine
         /// <summary>
         /// 删除指定键的配置项。
         /// <para>
-        /// 【未接线】引擎内部（Runtime/Editor/Tests/Samples~）当前无消费点，属**公开契约**
+        /// 【调用面】引擎内部（Runtime/Editor/Tests/Samples~）当前无消费点，属**公开契约**
         /// （业务清缓存 / 重置单项设置时直接用），不要按"无人使用"删除。
         /// </para>
         /// </summary>
@@ -44,7 +44,7 @@ namespace CloverEngine
         void Delete(string key);
         /// <summary>
         /// 清空所有配置项。
-        /// <para>【未接线】同上：属**公开契约**，引擎内部无消费点，不要按"无人使用"删除。</para>
+        /// <para>【调用面】同上：属**公开契约**，引擎内部无消费点，不要按"无人使用"删除。</para>
         /// </summary>
         void DeleteAll();
     }
@@ -55,12 +55,12 @@ namespace CloverEngine
     /// <para><b>持久化语义（加固）</b>：</para>
     /// <list type="bullet">
     /// <item>写盘走「先写 <c>settings.json.tmp</c> → <see cref="File.Replace"/> 原子替换」，
-    /// 写一半崩溃/抛异常都不会截断或破坏既有 settings.json（旧实现 <c>File.WriteAllText</c> 直写目标文件，
-    /// 中途失败会留下半截 json，下次 Load 解析失败 → 全部设置静默回默认）。</item>
+    /// 写一半崩溃/抛异常都不会截断或破坏既有 settings.json（⛔ 直写目标文件中途失败会留下半截 json，
+    /// 下次 Load 解析失败 → 全部设置静默回默认）。</item>
     /// <item>Load 遇到损坏 json：先把原文件另存为 <c>settings.json.corrupt</c>（保留现场），
-    /// 再打 Error 并回退默认值 —— 不再让损坏内容"留在磁盘上且永不修复"。</item>
-    /// <item>目录为 null / 空串 / 非法时<b>不再抛异常</b>：旧实现 <c>Directory.CreateDirectory("")</c>
-    /// 会抛 ArgumentException，把 <c>Game.Launch</c> 直接打崩；现在退化为内存存储并打 Warn。</item>
+    /// 再打 Error 并回退默认值（损坏内容已另存副本，不会留在原地无人修复）。</item>
+    /// <item>目录为 null / 空串 / 非法时<b>不抛异常</b>：<c>Directory.CreateDirectory("")</c>
+    /// 会抛 ArgumentException 把 <c>Game.Launch</c> 直接打崩；此处退化为内存存储并打 Warn。</item>
     /// <item><see cref="Set{T}"/> 会先验证值可 JSON 序列化，不可序列化时<b>拒绝写入并报错</b>：
     /// 否则一个坏值进字典后，此后每次 Save 都失败，整份配置再也落不了盘。</item>
     /// </list>
@@ -149,7 +149,7 @@ namespace CloverEngine
         /// <summary>
         /// 获取指定键的值，若不存在或类型转换失败则返回默认值。
         /// 转换失败（数值溢出、格式非法、类型不匹配）时<b>会留下日志</b>，再回默认值 ——
-        /// 旧实现空 catch 吞掉异常，表现为"配置莫名其妙变默认值"且无从排查。
+        /// ⛔ 不可空 catch 吞掉异常：那会表现为"配置莫名其妙变默认值"且无从排查。
         /// </summary>
         /// <param name="key">配置键名。</param>
         /// <param name="defaultValue">默认值。</param>
@@ -172,10 +172,8 @@ namespace CloverEngine
                 if (typeof(T) == typeof(string))
                     return (T)(object)(value?.ToString() ?? string.Empty);
 
-                // 【已删除的死分支】原先这里还有两条 `value is Dictionary<string,object> && typeof(T)==typeof(object)`
-                // 与 `value is List<object> && typeof(T)==typeof(object)` 的特判：它们不可达 ——
-                // T 为 object 时上面的 `value is T typed` 对任何非 null 值都已命中并直接返回，
-                // 根本走不到这里。保留注释以免后人再把它们加回来。
+                // 注意：任何 `value is Dictionary<string,object>/List<object>` 且 `typeof(T)==typeof(object)`
+                // 的特判都不可达 —— T 为 object 时上面的 `value is T typed` 对任何非 null 值都已命中并直接返回。
             }
             catch (Exception ex)
             {

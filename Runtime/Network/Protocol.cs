@@ -13,9 +13,8 @@ namespace CloverEngine
     //   - EPlayerFullSyncNotify.Data / AccountData 为 map[string]json.RawMessage，
     //     JsonUtility 无法表达，需要动态解析时使用 MiniJson（见 WorldSync / Game.Sync）。
 
-    // ESignupRequest / ESignupReply 已随「注册移到账号服 HTTP」删除：
-    // 注册只走 CloverAuth.SignupAsync（POST {账号服}/auth/signup），
-    // 游戏服不接收注册报文，双端都不再需要这两个协议体（服务端同步已删）。
+    // 注册只走 CloverAuth.SignupAsync（POST {账号服}/auth/signup）：
+    // 游戏服不接收注册报文，双端都不需要 ESignupRequest / ESignupReply 这两个协议体。
 
     /// <summary>
     /// 账号登录请求（EMsg.Login）。

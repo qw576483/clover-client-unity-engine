@@ -8,13 +8,7 @@ namespace CloverEngine
     /// <summary>
     /// 控制台兜底日志实现：把日志直接写进 Unity Console（<see cref="Debug"/>）。
     /// <para>
-    /// 存在理由：<c>Game.Logger</c> 原先只在 <c>Game.Launch</c> 里被赋值，未启动时恒为 null，
-    /// 而引擎内部到处是 <c>Game.Logger?.Xxx(...)</c> 的写法 —— 于是「启动之前」和「测试里没调 Launch」
-    /// 这两种情况下，**所有诊断信息会被 <c>?.</c> 静默吞掉**，只留下一个「什么都没发生」的现象。
-    /// 典型受害者：<c>WebSocketConnection</c> 的握手失败原因、<c>ResourceManager</c> 的后端选择失败原因。
-    /// </para>
-    /// <para>
-    /// 现在 <c>Game.Logger</c> **永不为 null**：未 Launch 时指向本类（写 Console，测试里直接可见），
+    /// <c>Game.Logger</c> **永不为 null**：未 Launch 时指向本类（写 Console，测试里直接可见），
     /// Launch 后（或 Shutdown 后）同样回到本类。因此 <c>Game.Logger?.Xxx</c> 里的 <c>?.</c>
     /// 已经没有存在必要，但保留它无害（行为不变）。
     /// </para>
@@ -25,8 +19,6 @@ namespace CloverEngine
     /// <para>
     /// <b>输出格式</b>：与 <see cref="Logger"/> 的文件行<b>完全一致</b> ——
     /// <c>[yyyy-MM-dd HH:mm:ss.fff] [级别] [tag] 消息</c>（见 <see cref="FormatLine"/>）。
-    /// 早先本类输出 <c>[Clover][tag] 消息</c>、既无时间也无级别，与文件日志对不上，
-    /// 排查时无法按时间对齐两条通道。
     /// </para>
     /// </summary>
     internal sealed class ConsoleLogger : ILogger

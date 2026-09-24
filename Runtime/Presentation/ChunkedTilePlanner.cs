@@ -1,13 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Presentation/ChunkedTilePlanner.cs
 //
-// 【出处】下沉自 `clover-project-diablo2` 的 `Module/Map/MapView.cs`
-//   可见格范围 → chunk 编号（`:1352-1609` ComputeVisibleChunkRange / PlannedChunks）、
-//   每帧节点预算准入（`:822-852` FrameAccepts）、整图重铺的双缓冲换帧（`:2660-2679`）。
-//
-// 【为什么下沉】「大地图按可见范围只建可见块 + 每帧节点预算分帧 + 整图重铺双缓冲」
-//   与题材无关：任何瓦片/网格大地图都要这一层，而引擎此前**一个 chunk/fog 设施都没有**
-//   （全仓 grep `chunk` 只在网络层命中无关词）。本件是**纯逻辑规划器** —— 不碰渲染、
+// 【通用性依据】「大地图按可见范围只建可见块 + 每帧节点预算分帧 + 整图重铺双缓冲」
+//   与题材无关：任何瓦片/网格大地图都要这一层。本件是**纯逻辑规划器** —— 不碰渲染、
 //   不建节点、不知素材，只回答「这一帧该处理哪些块、还剩多少节点额度、该不该换缓冲」。
 //
 // 【用法】持有一个实例（每张地图一个），每帧：
@@ -20,7 +15,6 @@
 // 【已知边界】⛔ 不含：视锥计算（可见格范围由调用方给）、节点池、贴图请求、迷雾状态、
 //   碰撞/可走性 —— 那些分别属 `TileWorld` / `TileNodePool` / `TileRenderer` / 业务。
 //   负坐标用「向下取整」口径的整除（`FloorDiv`），别用 C# 的截断除法。
-// ⛔ 本件是引擎新增件，项目侧 `MapView.cs` 的接线**尚未做**（其现有实现保持可用）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System.Collections.Generic;
@@ -170,9 +164,9 @@ namespace CloverEngine
 
         /// <summary>
         /// **追加**区间内的 chunk 坐标（`Vector2Int` 形态）到 <paramref name="into"/>；
-        /// ⛔ **不清空**（与消费方 `MapView.PlannedChunks` 的既有语义一致：调用方自己决定清不清）。
+        /// ⛔ **不清空**（调用方自己决定清不清）。
         /// <para>⚠️ <paramref name="xOuter"/> 决定**遍历次序**，它会影响同 `sortingOrder` 的兄弟序 ⇒
-        /// **画面逐像素**：`true` = cx 外层 / cy 内层（diablo2 `MapView.PlannedChunks` 的既有顺序），
+        /// **画面逐像素**：`true` = cx 外层 / cy 内层（默认），
         /// `false` = cy 外层（<see cref="EnumerateChunks"/> 的顺序）。改这条参数 = 改画面，别随手改。</para>
         /// </summary>
         public static void AppendChunkCoords(int cx0, int cx1, int cy0, int cy1, List<Vector2Int> into,

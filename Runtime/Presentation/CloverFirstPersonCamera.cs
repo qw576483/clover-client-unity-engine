@@ -22,8 +22,7 @@ namespace CloverEngine
     /// <para><b>复用（⛔ 本类不许再抄一份数学）</b>：</para>
     /// <list type="bullet">
     /// <item>yaw/pitch 累加 + pitch 夹取 ⇒ 引擎件 <see cref="LookAccumulator"/>
-    ///   （逐字来自 cs16 <c>Module/Player/PlayerMotor.ApplyMouseLook</c>：<c>Repeat(yaw+…,360)</c> 环绕、
-    ///   <c>Clamp(pitch+…, ±limit)</c> 夹紧、<c>delta.y</c> 向下为正）；</item>
+    ///   （<c>Repeat(yaw+…,360)</c> 环绕、<c>Clamp(pitch+…, ±limit)</c> 夹紧、<c>delta.y</c> 向下为正）；</item>
     /// <item>视线方向 ⇒ <see cref="CameraMath.AimDirection"/>（yaw 0 = +Z、pitch 正 = 抬头）；</item>
     /// <item>水平 → 垂直 FOV ⇒ <see cref="CameraMath.FovYFromFovX"/>（原版 <c>CalcFov</c> 等价式，
     ///   越界回退 90、<c>aspect&lt;=0</c> 原样返回）；</item>
@@ -176,7 +175,7 @@ namespace CloverEngine
         public float Pitch => Mathf.Clamp(Look.Pitch + RecoilPitch + ShakePitch, -PitchLimit, PitchLimit);
 
         /// <summary>水平灵敏度（**度 / count**，不是倍率）：由业务把玩家设置乘上玩法换算系数后填入
-        /// （cs16 原口径 = 设置值 × 0.022°/count）。<c>&lt;=0</c> ⇒ 忽略水平位移。</summary>
+        /// （示例口径 = 设置值 × 0.022°/count）。<c>&lt;=0</c> ⇒ 忽略水平位移。</summary>
         public float SensitivityX = 1f;
 
         /// <summary>垂直灵敏度（度 / count）：仅当 <see cref="SeparateAxes"/> = true 时生效。</summary>
@@ -205,10 +204,8 @@ namespace CloverEngine
 
         /// <summary>
         /// 后坐力**上跳**的跟随时间常数（秒，<c>&lt;=0</c> = 立即到位）。
-        /// 语义来自 cs16 <c>FirstPersonCamera.PrepareView</c> 的后坐力那段（原实现口径；⛔ 该文件现已重构为
-        /// **消费本件**（<c>_rig.RecoilRiseTau</c> / <c>_rig.RecoilFallTau</c>），故此处只按**符号名**引用 ——
-        /// 行号随 cs16 演进，别按行号检索）：权威值在模拟里，
-        /// 本类**只做表现跟随**（上跳用快的常数、回正用慢的常数 ⇒ "抬得快、落得慢"），⛔ 不再累加一份。
+        /// 权威值在模拟里，本类**只做表现跟随**（上跳用快的常数、回正用慢的常数 ⇒ "抬得快、落得慢"），
+        /// ⛔ 不许再累加一份。
         /// </summary>
         public float RecoilRiseTau;
 
@@ -276,10 +273,9 @@ namespace CloverEngine
         private float _shakeLeft;
 
         /// <summary>
-        /// 注入一次摇晃（受击 / 爆炸 / 落地）。语义对齐 cs16 <c>FirstPersonCamera</c> 的受击晃动
-        /// （原实现口径：幅度按伤害归一后取三轴随机 <c>Range(-k, k)</c>；cs16 现值见其 <c>OnDamaged</c> →
-        /// <c>_rig.AddShake(deg, duration)</c>），但随机源换成**注入的**
-        /// <see cref="ShakeRng"/>（引擎禁用全局静态随机器），且幅度 / 时长全部由业务传入（⛔ 引擎不内置）。
+        /// 注入一次摇晃（受击 / 爆炸 / 落地）：三轴各取一个随机方向（<c>Range(-1, 1)</c>）再乘幅度
+        /// （幅度由调用方按伤害归一后算出）；随机源是**注入的**
+        /// <see cref="ShakeRng"/>（引擎禁用全局静态随机器），幅度 / 时长全部由业务传入（⛔ 引擎不内置）。
         /// </summary>
         /// <param name="amplitudeDegrees">起始幅度（度，<c>&gt;0</c>）。</param>
         /// <param name="durationSeconds">持续时长（秒，<c>&gt;0</c>）：期间幅度**线性**衰减到 0。</param>
@@ -326,10 +322,8 @@ namespace CloverEngine
         // ─────────────────────── 视点晃动的注入缝 ───────────────────────
 
         /// <summary>
-        /// 业务每帧塞进来的**相机局部空间**视点偏移（典型 = 引擎件 <see cref="ViewBob"/>.Offset，x = 右、y = 上）。
-        /// 语义对齐 cs16 <c>FirstPersonCamera.PrepareView</c> 的视点晃动那段（原实现口径；cs16 现值
-        /// ViewBob → <c>_rig.ViewOffset</c> / <c>_rig.ViewRoll</c>）：偏移先转进视线空间再加到眼位，
-        /// 这样"左右晃"不会让机位方向算错。
+        /// 业务每帧塞进来的**相机局部空间**视点偏移（典型 = 引擎件 <see cref="ViewBob"/>.Offset，x = 右、y = 上）：
+        /// 偏移先转进视线空间再加到眼位，这样"左右晃"不会让机位方向算错。
         /// <para>⚠️ 偏移**不影响** <see cref="AimDirection"/> 与 <see cref="EyePosition"/> ——
         /// 子弹不跟着脚步摆（射线由调用方用不含 bob 的位姿发出）。</para>
         /// </summary>
@@ -405,7 +399,7 @@ namespace CloverEngine
         /// <para>⚠️ <b>语义提醒（别接反）</b>：<c>Lock</c> 是**全局输入闸门** —— 锁定期间所有读取返回默认值
         /// （含移动 / 技能 / **视角**，见 <c>Runtime/Presentation/Input.cs:780-801</c>），所以它对应的是
         /// "暂停 / 交给 UI"，**不是** FPS 的"锁住光标但继续转视角"。后者在本引擎里由业务自己设
-        /// <c>UnityEngine.Cursor.lockState / visible</c> 实现（引擎输入门面不碰鼠标可见性，本片也不替业务接线）。</para>
+        /// <c>UnityEngine.Cursor.lockState / visible</c> 实现（引擎输入门面不碰鼠标可见性，也不替业务接线）。</para>
         /// </summary>
         /// <returns>是否真的加锁（引擎未启动 / 已锁 / 本 rig 已持有 ⇒ false）。</returns>
         public bool LockInput()
@@ -505,7 +499,7 @@ namespace CloverEngine
             {
                 if (_everBound)
                 {
-                    // 曾经绑定、现在拿不到（被销毁）：Unity 的 == null 会覆盖"已销毁"这一情形。
+                    // 已绑定过、现在拿不到（被销毁）：Unity 的 == null 会覆盖"已销毁"这一情形。
                     LogThrottle.WarnThrottled(Tag, "fps.camera.gone",
                         "绑定的相机已被销毁 / 置空，本帧不下发位姿；切场景后请重新 Bind()");
                 }
@@ -532,7 +526,7 @@ namespace CloverEngine
                 ? CameraMath.FovYFromFovX(FovXCurrent, cam.aspect)
                 : FovXCurrent;
 
-            // ViewOffset 是**相机局部空间**偏移：先转进视线空间再加到眼位（与 cs16 原实现同口径）。
+            // ViewOffset 是**相机局部空间**偏移：先转进视线空间再加到眼位。
             cam.transform.SetPositionAndRotation(EyePosition + rotation * ViewOffset, rotation);
             cam.fieldOfView = VerticalFieldOfView;
         }

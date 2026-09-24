@@ -2,42 +2,21 @@
 // CloverEngine · Runtime/Presentation/SnapshotInterpolator.cs
 // 「低频权威快照 → 高帧率插值表现」的**渲染时钟 + 插值窗口选择**件（无 MonoBehaviour，由业务 Tick 驱动）。
 //
-// 来源：clover-project-cr `client/Assets/Scripts/View/BattleViewRoot.cs`
-//   · 类注释三（`:32-76`）—— 做法与**三代失败模式**；
-//   · 常量与自检面（`:349-604`）—— `HistSlots` / `RenderLagIntervals` / `SteerRate` / 各行自检量；
-//   · 实现（`:1622-1842`）—— `RenderClockMs` / `ServerNowMs` / `SelectWindow` / `SetClockRate` /
-//     `TickRender`；快照入历史在 `:908-996`（`OnSnapshot`）。
-//   该工程服务端 10 Hz、客户端 ~30~60 FPS；本件把"哪几个数量"变成参数（见下方 ⚙ 参数表）。
+//   典型部署：服务端 10 Hz、客户端 ~30~60 FPS；本件把"哪几个数量"变成参数（见下方 ⚙ 参数表）。
 //
-// ═══════════════ 三代失败模式（★ 本件最值钱的部分，三代都要留在注释里） ═══════════════
-//
-// **第一代：分母写死 + 每帧重置** ⇒ **前跳**。
-//   分母写死成一个常量间隔，且**每收到一帧快照就把"当前帧到达时刻"重置** ⇒ 插值比例 `t` 每收一帧
-//   从 0 重来一次。快照间隔只要短于那个常量，上一次已经插值到 t=0.6 的位置就被整段丢弃、直接跳到新起点
-//   ⇒ **每收一帧往前跳一次**（用户报的"模型抖动的厉害"）。
-//
-// **第二代：到达驱动换窗口** ⇒ **抖动**（时钟按真实时间走、分母也用真实间隔，这两条已经对了，但……）。
-//   换窗口仍然绑在"**包到达**"上：每收一帧就把 `(prev, cur)` 换成最新的一对。于是"换窗口那一刻"由
-//   **网络到达时刻**决定，而时钟是按真实时间走的 ⇒ 换的瞬间时钟离窗口末端还差 0~1 帧，
-//   窗口末端那一小段位移被**塞进换窗口的那一帧**交付。实测：`t` 最高只到 0.707（= 窗口从来没走完）、
-//   单帧速度在 0.78~1.05 之间跳（**cv 0.24**、峰值比 1.23）—— 人眼看到的就是 10 Hz 的"哆嗦"。
-//   离线仿真把这条路钉死：关掉速率微调（速率恒 1）但保留"到达驱动换窗口" ⇒ 速度 cv 反而升到 0.37~0.47；
-//   **改成按时钟选窗口 ⇒ 速度 cv 0.000、峰值比 1.000、零位移帧 0**。
-//
-// **本代（本件）：按时钟选窗口 + 有界比例速率修正**。
+// ═══════════════ 语义：按时钟选窗口 + 有界比例速率修正 ═══════════════
 //   四步（全部在 `Tick` / `RenderClockMs` / `SelectWindow` 里）：
 //   <list type="number">
 //   <item>渲染时钟 = <c>对齐点 + (真实时间 - 对齐时刻) × 1000 × 速率</c> ——
 //     **只按真实时间前进，收到快照时绝不重置**。它渲染的是"服务端时间轴上的哪一毫秒"。
 //     ⛔ 不写"每帧累加 `Time.deltaTime`"：那个值被 Unity 夹在 `Time.maximumDeltaTime`（默认 1/3 秒），
-//     一次卡顿就让时钟**永久落后**（实测 1915~2108 ms），于是 `t` 恒为 0、单位冻住不动。</item>
+//     一次卡顿就让时钟**永久落后**，于是 `t` 恒为 0、单位冻住不动。</item>
 //   <item>速率 = <b>有界比例修正</b>（<c>SteerRate</c>）：偏差 ≤ 追帧阈值时在 ±
 //     <see cref="SnapshotInterpolatorOptions.LagSteerMaxRate"/> 内**按比例**微调（稳态 ±5%），
 //     偏差超过阈值时放开到 <see cref="SnapshotInterpolatorOptions.CatchUpMaxRate"/> 做**有界追帧**。
 //     <b>为什么必须常开</b>：位置的导数就是速度 ⇒ 校正**绝不能"瞬跳时钟"**（那会让单位前跳一大截）；
 //     但也**不能完全不校正** —— 落后量一旦涨到超过快照历史的覆盖范围，`SelectWindow` 只能夹到最旧一对、
-//     `t` 恒为 0，**插值静默失效**（实测 7953 帧里 `t` 只有 3 帧取到中间值，其余非 0 即 1，
-//     单位实际是每 100 ms 跳一格）。5% 的速率调制只在那几秒存在（偏差衰减到 0 后速率自动回 1），
+//     `t` 恒为 0，**插值静默失效**。5% 的速率调制只在那几秒存在（偏差衰减到 0 后速率自动回 1），
 //     换来的是插值永不失活。</item>
 //   <item>**按渲染时钟**从 <see cref="SnapshotInterpolatorOptions.HistSlots"/> 格快照历史里选
 //     "夹住时钟的那一对"（`SelectWindow`），渲染落后**最新快照** <see cref="SnapshotInterpolatorOptions.RenderLagIntervals"/>
@@ -52,10 +31,9 @@
 //   这是"**绝不前跳**"换来的代价，刻意如此：前跳会瞬间把单位推过头（甚至穿过墙）。
 //   允许多付的只是**秒级的 ±5% 速率微调**（把落后量自己走回目标），不是位置瞬跳。
 //
-// **另外两条只夹取、不追帧就会踩的坑（都在 `Tick` 里）**：
+// **另外两条上限（都在 `Tick` 里）**：
 //   · **时钟超前上限**（`ClockMaxLeadIntervals`）：快照**停推**（对局结束 / 断线 / 服务端不再发）后
-//     "服务端现在"会一路外推、时钟跟着跑飞 —— 实测超前最新快照 **50.8 s**（12902 行里 7891 行
-//     `t` 被夹成 1.0）；用 ±5% 的速率把 50 s 拉回来要上千秒 ⇒ 那段时间单位全部冻在最后一帧。
+//     "服务端现在"会一路外推、时钟跟着跑飞，`t` 被夹成 1.0、那段时间单位全部冻在最后一帧。
 //     ⇒ "没有新数据就不许发明时间"：把时钟夹在 `最新 + ClockMaxLeadIntervals 个间隔`，
 //     快照一恢复就立刻松开（不需要靠速率追）。
 //   · **"服务端现在"的外推封顶**（`ServerNowExtrapCapIntervals`）：同一个停推场景下，
@@ -73,7 +51,7 @@
 //   CatchUpMaxRate          追帧时速率最多跑到多快（默认 1 ⇒ 最高 2× 真实时间）。
 //   CatchUpThresholdIntervals 追帧阈值（几个间隔，默认 3）—— 它**只是"放开档位"的界线**，
 //                           ⛔ 不是"要不要校正"的开关（300 ms 以内同样在按比例校正）。
-//   ServerNowExtrapCapIntervals / ClockMaxLeadIntervals  见上方两条坑（默认 2 / 1）。
+//   ServerNowExtrapCapIntervals / ClockMaxLeadIntervals  见上方两条上限（默认 2 / 1）。
 //
 // ═══════════════ 与既有引擎件的边界 ═══════════════
 //   · **不是 `WorldSync` 的重复**：`WorldSync` 是 MMO/AOI 的**逐实体**镜像同步（服务器实体事件 →
@@ -92,11 +70,10 @@
 //
 // ═══════════════ 时钟注入（★ 便于离线单测） ═══════════════
 //   构造时可注入 `Func<float> clockSeconds`（**返回秒**，语义同 `Time.realtimeSinceStartup`）。
-//   ⛔ 本件**每帧只采样一次**该时钟，并用同一个样本算 `渲染时钟` 与 `服务端现在` ——
-//   参考实现里 `RenderClockMs` / `ServerNowMs` 是两个会各自再读一次真实时间的属性，
-//   换成注入时钟后那样写会拿到不同样本（不可复现）⇒ 本件统一成 `...At(real)` 形式（语义等价、可复现）。
-//   ⚠️ **真暂停**的项目（`Time.timeScale = 0`）要自己决定时钟语义：默认用 realtime ⇒ 暂停时时钟照走
-//   （参考工程的对战不真暂停，故它是安全的）；要"暂停就冻住"，注入一个只在非暂停时推进的时钟即可。
+//   ⛔ 本件**每帧只采样一次**该时钟，并用同一个样本算 `渲染时钟` 与 `服务端现在`
+//   （各自再读一次会拿到不同样本、不可复现）⇒ 统一成 `...At(real)` 形式（语义等价、可复现）。
+//   ⚠️ **真暂停**的项目（`Time.timeScale = 0`）要自己决定时钟语义：默认 realtime ⇒ 暂停时时钟照走；
+//   要"暂停就冻住"，注入一个只在非暂停时推进的时钟即可。
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System;
@@ -106,7 +83,7 @@ namespace CloverEngine
 {
     /// <summary>
     /// 快照插值器的可调参数（<b>结构体 + 公开字段</b>，与 <c>ViewBobConfig</c> 同形）。默认值见
-    /// <see cref="Default"/>（= 参考工程实测收敛的那一组：10 Hz 快照 / 6 格历史 / 落后 2 个间隔 / ±5%）。
+    /// <see cref="Default"/>（= 默认那组：10 Hz 快照 / 6 格历史 / 落后 2 个间隔 / ±5%）。
     /// <para>⛔ 换快照频率或渲染帧率时**必须**改 <see cref="SnapshotIntervalMs"/> 与
     /// <see cref="ExpectedRenderFps"/>，别指望默认值对任何节奏都好。</para>
     /// </summary>
@@ -168,7 +145,7 @@ namespace CloverEngine
         /// <summary>历史覆盖时长（毫秒）= <c>(HistSlots - 1)</c> × <see cref="SnapshotIntervalMs"/>。</summary>
         public float HistoryCoverageMs { get { return Mathf.Max(0, HistSlots - 1) * SnapshotIntervalMs; } }
 
-        /// <summary>参考工程实测收敛的那一组默认值（10 Hz 快照 / 6 格历史 / 落后 2 个间隔 / ±5% 速率）。</summary>
+        /// <summary>默认值（10 Hz 快照 / 6 格历史 / 落后 2 个间隔 / ±5% 速率）。</summary>
         public static SnapshotInterpolatorOptions Default()
         {
             return new SnapshotInterpolatorOptions
@@ -208,7 +185,7 @@ namespace CloverEngine
     /// <para>
     /// <b>为什么给 `payload` 而不是内建实体容器</b>：本件只管**时间**。调用方的快照类型（有什么字段、
     /// 几张表、怎么插值）是业务自由，本件不替它建容器、也不做拷贝（`payload` 是**引用**，
-    /// 与参考实现"入历史只存引用、每帧多一次分配都不要"的口径一致）。
+    /// ⛔ 入历史只存引用、每帧多一次分配都不要）。
     /// </para>
     /// <para><b>主线程使用</b>（与 <see cref="LogThrottle"/> 一致，非线程安全）。</para>
     /// </summary>
@@ -364,7 +341,7 @@ namespace CloverEngine
         /// <summary>本件的参数（只读，归一化之后的那一组）。</summary>
         public SnapshotInterpolatorOptions Options { get { return _options; } }
 
-        // ── 自检面（判据用；语义与参考工程逐条对齐） ─────────────────────────
+        // ── 自检面（判据用；语义逐条固定） ─────────────────────────
 
         /// <summary>已收到的快照数（含被丢弃的乱序帧？**不含** —— 只数入历史的那些）。</summary>
         public int SnapshotCount { get { return _snapshotCount; } }

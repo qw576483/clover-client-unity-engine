@@ -107,10 +107,7 @@ namespace CloverEngine.Tests
         /// <summary>
         /// 首连失败必须上报 <c>Disconnected</c> 且状态落到 <c>Disconnected</c>。
         ///
-        /// 回归用例：<c>_linkDown</c> 初值曾为 1（「未连接视为已上报」），而它只在**连接成功之后**
-        /// 才被清 0，于是「第一次就连不上」这条路径会被 <c>HandleLinkFailure</c> 的
-        /// <c>Interlocked.Exchange(ref _linkDown, 1) == 1</c> 早退掉 —— 不回调、State 卡在
-        /// <c>Connecting</c>、socket 不释放。NetworkManager 的降级换线与退避重连**完全挂在这个回调上**，
+        /// NetworkManager 的降级换线与退避重连**完全挂在这个回调上**，
         /// 所以这个标记必须在每次 <c>ConnectAsync</c> 开始时清 0。
         /// </summary>
         [UnityTest]

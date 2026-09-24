@@ -8,8 +8,7 @@ namespace CloverEngine
     /// 支持 On/Once/Off/Emit，事件名字符串匹配，支持泛型参数传递。
     ///
     /// <para><b>订阅配对语义（实现契约）</b>：同一事件上**同一 handler 重复注册会被忽略并告警**（不再叠加多份），
-    /// 因此一次 <c>Off</c> 即注销干净、不残留 —— 旧实现允许叠加多份而 <c>Off</c> 只删首个，
-    /// 重复 Init / 忘记配对 Off 时会表现为"回调翻倍 + 订阅泄漏"。</para>
+    /// 因此一次 <c>Off</c> 即注销干净、不残留（否则重复 Init / 忘记配对 Off 会表现为"回调翻倍 + 订阅泄漏"）。</para>
     /// <para><b>分发期间修改即时生效</b>：<c>Emit</c> 回调里调用 <c>Off</c> / <c>OffAll</c>，
     /// 被注销的 handler 本帧不再触发（未被注销者也不会重复触发）。</para>
     ///
@@ -66,7 +65,7 @@ namespace CloverEngine
         /// <summary>
         /// 按优先级注册无参数监听器：priority 越大越先执行（同优先级内仍是后注册先执行）。
         ///
-        /// 为什么需要它：注册顺序此前是控制执行顺序的**唯一**手段，业务想表达"我必须先跑"
+        /// 为什么需要它：没有优先级时注册顺序是控制执行顺序的**唯一**手段，业务想表达"我必须先跑"
         /// 只能靠"后注册"或者干脆在 Update 里轮询等状态 —— 那是把顺序依赖藏起来而不是写出来。
         /// </summary>
         /// <param name="eventName">事件名称</param>
@@ -133,10 +132,9 @@ namespace CloverEngine
         /// <summary>
         /// 一条监听记录：回调 + 优先级。
         ///
-        /// 加优先级的原因：监听器的执行顺序此前**只由注册顺序决定**（后注册先执行），
+        /// 加优先级的原因：没有它时监听器的执行顺序**只由注册顺序决定**（后注册先执行），
         /// 业务想说"我这个必须先跑"就没有任何表达手段 —— 只能靠在 Update 里轮询等某个状态，
-        /// 或者把初始化代码塞进别人的回调里（本项目 `App.Bootstrap` 就是被逼着轮询等"视图根出现"）。
-        /// 有优先级之后，这类顺序依赖可以写出来而不是"碰巧成立"。
+        /// 或者把初始化代码塞进别人的回调里。有优先级之后，这类顺序依赖可以写出来而不是"碰巧成立"。
         /// </summary>
         private readonly struct HandlerEntry : IEquatable<HandlerEntry>
         {
@@ -247,8 +245,7 @@ namespace CloverEngine
         /// <summary>
         /// 移除指定事件的所有监听器。
         /// <para>
-        /// 分发（<see cref="Emit(string)"/>）过程中调用也**即时生效**：本帧剩余 handler 不再触发 ——
-        /// 旧实现只从字典删条目、不动正在遍历的列表，本帧剩余 handler 仍会全部触发。
+        /// 分发（<see cref="Emit(string)"/>）过程中调用也**即时生效**：本帧剩余 handler 不再触发。
         /// </para>
         /// </summary>
         /// <param name="eventName">事件名称</param>
@@ -381,9 +378,8 @@ namespace CloverEngine
         /// <summary>
         /// 从注册表删除该 handler 的**全部**注册条目（覆盖普通与 once 两张表）。
         /// <para>
-        /// 旧实现只删首个匹配：与"On 允许重复注册"组合后，注册两次、Off 一次仍残留一份，
-        /// 造成重复回调与订阅泄漏。现在 On 已对同一 handler 去重（至多一份），这里再全删一层
-        /// 保证"无论历史/边缘情况下有几份，一次 Off 都注销干净"。
+        /// On 已对同一 handler 去重（至多一份），这里再全删一层，
+        /// 保证"无论边缘情况下有几份，一次 Off 都注销干净"，不残留重复回调与订阅泄漏。
         /// </para>
         /// </summary>
         private static void RemoveFrom(Dictionary<string, List<HandlerEntry>> map, string eventName, Delegate handler)
@@ -469,7 +465,7 @@ namespace CloverEngine
         {
             if (_handlers.TryGetValue(eventName, out var list) && list.Count > 0)
             {
-                // 快照 + "仍在册"检查（旧实现直接对原表做倒序索引遍历）：
+                // 快照 + "仍在册"检查：
                 //   ① 快照固定本轮条目序列 —— 已执行过的不会因列表左移被重复触发，也不会取越界下标；
                 //   ② 每个条目执行前检查它是否仍挂在当前注册表里 —— 回调内 Off / OffAll 即时生效，
                 //      被注销者本帧不再触发；OffAll 把整表摘出字典后，剩余条目全部跳过。
@@ -497,7 +493,7 @@ namespace CloverEngine
             if (_onceHandlers.TryGetValue(eventName, out var onceList) && onceList.Count > 0)
             {
                 // 一次性订阅与普通订阅用同一套顺序语义：表按「执行逆序」存放，倒着走
-                // （旧实现快照后按注册序正序触发，与 On 的"后注册先执行"恰好相反）。
+                // （与 On 的"后注册先执行"一致）。
                 // 逐条消费（而不是整表 Clear）：分发中 Off 掉某条 once 时同样即时生效。
                 var snapshot = new List<HandlerEntry>(onceList);
                 for (var i = snapshot.Count - 1; i >= 0; i--)

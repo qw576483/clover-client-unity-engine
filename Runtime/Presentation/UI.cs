@@ -5,7 +5,7 @@ using UnityEngine.UI;
 
 namespace CloverEngine
 {
-    // 契约（UILayer / IUIPanel / IUIManager）已下沉到 Runtime/Core/PresentationContracts.cs，
+    // 契约（UILayer / IUIPanel / IUIManager）见 Runtime/Core/PresentationContracts.cs，
     // 因为 Game 门面在 Core，而依赖方向是 Presentation → Core 单向。
 
     /// <summary>
@@ -51,9 +51,9 @@ namespace CloverEngine
 
             var scaler = _root.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            // ★ 画布适配可配置：参考分辨率与匹配权重改为**可配置**（`CloverPresentation.ReferenceResolution` /
-            //   `.MatchWidthOrHeight`），默认值 = 本文件原先写死的 1920×1080 / 0.5
-            //   ⇒ 不配置时行为与旧版逐字一致（横版项目零影响）；竖版项目在 Game.Launch **之前**
+            // ★ 画布适配可配置：参考分辨率与匹配权重是可配置的（`CloverPresentation.ReferenceResolution` /
+            //   `.MatchWidthOrHeight`），默认值 = 1920×1080 / 0.5
+            //   ⇒ 不配置时行为不变（横版项目零影响）；竖版项目在 Game.Launch **之前**
             //   设成 1080×1920 / match=0。
             //   ⛔ 这里只读一次，Launch 之后改这两个属性不生效（画布已建好）。
             scaler.referenceResolution = CloverPresentation.ReferenceResolution;
@@ -78,15 +78,12 @@ namespace CloverEngine
 
             // 通用件各自挂在自己那一层：Toast/飘字进 Top，Loading/引导进 System（最高），确认框进 Top。
             //
-            // ★ 本项目实测到的引擎缺陷（2026-09-17），最小修复：
-            //   确认框原先挂在 **Popup** 层（`UILayer.Popup = 2`），而**暂停菜单 / 死亡屏在 `Top = 3`**
-            //   （见 `Core/PresentationContracts.cs:20-27` 的层序 Background=0 < Normal=1 < Popup=2 < Top=3 < System=4）。
-            //   Top 层的节点在层级里排在 Popup 之后 ⇒ 它的所有子节点**画在确认框之上、且先被射线命中**
-            //   ⇒ 从暂停菜单点「回主菜单」弹出的确认框**整块被暂停菜单盖住，鼠标永远点不到**（确认/取消都点不动）。
-            //   实测（clover-project-diablo2 · 验收 #42）：`Game.UI.Confirm` 后 `confirm=1` 但面板一直在，
-            //   真鼠标点击落到的是暂停菜单那一层的按钮（还会误触「选项」，把选项屏重新打开）。
-            //   修复：确认框改挂 Top 层（后创建 ⇒ 兄弟序在后 ⇒ 在暂停菜单之上、在其之上的只有 System）；
-            //   它本来就是"模态确认"，必须在所有交互层之上。
+            // 确认框挂 **Top** 层：Top 层的节点在层级里排在 Popup 之后
+            // （层序见 `Core/PresentationContracts.cs:20-27`：Background=0 < Normal=1 < Popup=2 < Top=3 < System=4）
+            // ⇒ 它的所有子节点**画在 Popup 之上、且先被射线命中** ⇒ 落在 Popup 层的确认框会被
+            // 暂停菜单 / 死亡屏整块盖住、鼠标点不到（确认/取消都点不动，点击落到暂停菜单那层的按钮）。
+            // 后创建 ⇒ 兄弟序在后 ⇒ 在暂停菜单之上、在其之上的只有 System；
+            // 它本来就是"模态确认"，必须在所有交互层之上。
             _toasts = new ToastLayer(_layers[(int)UILayer.Top]);
             _floats = new FloatTextLayer((RectTransform)_layers[(int)UILayer.Top]);
             _loading = new LoadingLayer(_layers[(int)UILayer.System]);
@@ -296,7 +293,7 @@ namespace CloverEngine
         /// <inheritdoc/>
         /// <remarks>
         /// 参数原样透传给 <c>FloatTextLayer</c>（默认值只写在契约上，实现里不重复一份，
-        /// 避免"两份默认值悄悄分歧"）。<c>riseWorld = 0</c> / <c>fade = true</c> 时逐字等于旧行为。
+        /// 避免"两份默认值悄悄分歧"）。<c>riseWorld = 0</c> / <c>fade = true</c> 时行为不变。
         /// </remarks>
         public void FloatText(Vector3 worldPos, string text, Color? color = null, float duration = 1.2f,
             float riseWorld = 0f, bool fade = true)
@@ -307,7 +304,7 @@ namespace CloverEngine
         /// <inheritdoc/>
         public void ShowLoading(string text = null)
         {
-            // 旧签名 = "不确定进度"（不显示进度条）⇒ 与本次改动之前**逐字一致**。
+            // 旧签名 = "不确定进度"（不显示进度条）⇒ 行为不变。
             _loading.Show(text, LoadingLayer.Indeterminate);
         }
 
@@ -383,7 +380,7 @@ namespace CloverEngine
             // 通用件先于面板推进：它们与窗口栈无关，即使一个业务面板都没开也要动
             // （否则 Toast 不淡出、Loading 不转、确认框停在原地）。
             // ★ 通用件用**不受 timeScale 影响**的 dt：暂停 / 结算（timeScale=0）时 Loading 仍要转、
-            //   Toast 仍要淡出，否则遮罩停转、提示永不消失（同 Timer unscaled 教训）。
+            //   Toast 仍要淡出，否则遮罩停转、提示永不消失。
             var widgetDt = Time.unscaledDeltaTime;
             TickWidget(_toasts.Tick, widgetDt, "Toast");
             TickWidget(_floats.Tick, widgetDt, "FloatText");
@@ -480,7 +477,7 @@ namespace CloverEngine
 
         private void HideMask()
         {
-            // 还有 Popup 面板开着就保留遮罩（直接判集合即可，原实现用临时结构体上的
+            // 还有 Popup 面板开着就保留遮罩（直接判集合即可；用临时结构体上的
             // GetEnumerator().MoveNext() 判空，写法晦涩且易被误改）。
             foreach (var p in _panels.Values)
             {

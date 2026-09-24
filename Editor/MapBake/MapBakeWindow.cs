@@ -67,8 +67,7 @@ namespace CloverEngine.Editor
 
                 if (GUILayout.Button("按场景包围盒推算原点与尺寸（换美术地图时用）"))
                 {
-                    // 推算失败必须显示为**失败态**（旧实现无条件 _ok = true，失败原因用 Info 蓝框显示，
-                    // 用户会把"场景不存在 / 没有几何"当成推算成功）。
+                    // 推算失败必须显示为**失败态**。
                     try
                     {
                         _ok = MapBaker.TryFitBoundsToScene(_o, out _result);
@@ -182,8 +181,6 @@ namespace CloverEngine.Editor
             var o = _o.Clone();
 
             // ★ 走**帧驱动**导出：逐格烘焙被切成每帧一块 + 可取消进度条。
-            //   旧实现同步跑 Export：大图（MaxDimension 32768）下点一次就把编辑器冻住数分钟、无任何反馈，
-            //   连"还在跑"都看不出来。这里立刻返回，结果由回调写回面板。
             _ok = true;
             _result = "烘焙中…（进度见进度条，可点取消）";
             Repaint();

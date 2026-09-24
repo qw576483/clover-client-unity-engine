@@ -75,7 +75,7 @@ namespace CloverEngine
         /// 当前帧输入快照。
         /// <para>
         /// <b>契约：返回的是副本，改它不影响引擎</b>（<see cref="InputState"/> 的字段仍是 public 可写，
-        /// 但那只是历史签名；实现必须把内部快照拷进一块**复用的**缓冲再交出去，
+        /// 但那只是签名形态；实现必须把内部快照拷进一块**复用的**缓冲再交出去，
         /// 因此业务写 <c>Game.Input.State.Xxx = …</c> 不会篡改引擎本帧输入）。
         /// 缓冲复用 = 每次读取**不分配新对象**；同一帧多次读取拿到的是同一实例，别把它存起来跨帧比对。
         /// </para>
@@ -94,8 +94,8 @@ namespace CloverEngine
         /// <summary>
         /// 当前是否有触摸输入。
         /// <para>
-        /// 【未接线】引擎内部（Runtime/Editor/Tests）当前无消费点，属**公开契约**（触屏统一接口）——
-        /// 尚未接线，业务可直接使用，不要按"无人使用"删除。
+        /// 【调用面】引擎内部（Runtime/Editor/Tests）当前无消费点，属**公开契约**（触屏统一接口）——
+        /// 业务可直接使用，不要按"无人使用"删除。
         /// </para>
         /// </summary>
         bool HasTouch { get; }
@@ -105,7 +105,7 @@ namespace CloverEngine
         /// <para>
         /// 【为什么归引擎】uGUI 的命中判定（<c>EventSystem.IsPointerOverGameObject()</c>）只有 uGUI
         /// 程序集里那一份实现才算权威；业务各自反射补一份会出现"两份口径、各自降级"，且反射拿不到
-        /// 类型时**静默恒 false**（离线宿主里连告警都没有）。下沉到引擎后口径唯一、降级可解释。
+        /// 类型时**静默恒 false**（离线宿主里连告警都没有）。口径唯一、降级可解释。
         /// 实现在 <c>Runtime/Presentation/Input.cs</c> 的 <c>InputInfrastructure.PointerOverUi</c>。
         /// </para>
         /// <para>
@@ -162,8 +162,8 @@ namespace CloverEngine
 
         // ───────────── 高层动作（回调式） ─────────────
         //
-        // 【本节整体未接线】引擎内部（Runtime/Editor/Tests）当前无 On*/Off* 的调用点，属**公开契约**
-        // （业务可直接用回调式高层动作，免去每帧读 State 的手写派发）—— 尚未接线，业务可直接使用，
+        // 【本节调用面】引擎内部（Runtime/Editor/Tests）当前无 On*/Off* 的调用点，属**公开契约**
+        // （业务可直接用回调式高层动作，免去每帧读 State 的手写派发）—— 业务可直接使用，
         // 不要按"无人使用"删除。State 快照（<see cref="State"/>）同样保留，二者可并存。
 
         /// <summary>注册移动回调（每帧移动向量非零时触发）。</summary>

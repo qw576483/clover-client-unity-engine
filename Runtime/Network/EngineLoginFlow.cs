@@ -32,13 +32,12 @@ namespace CloverEngine
     /// 引擎登录流程：把「等连接 → 注册 → 账号服换 token → EMsg.Login → SetupSession →（业务建角）
     /// →（业务进图）→ 断线后自动重新登录 / 会话恢复后自动重新进图」这条链路固化成引擎组件。
     ///
-    /// 为什么这属于引擎（而不是业务各写一遍）：
-    /// 登录链是**每个联网项目都逐字相同**的（账号服 HTTP 换 token + 长连接登录），
-    /// 而其中两处判断写错的表现都是**静默**的，且都真实踩过：
+    /// 定位：把登录链（账号服 HTTP 换 token + 长连接登录）固化成引擎组件；其中两处判断
+    /// 写错的表现都是**静默**的：
     /// <list type="number">
     /// <item><b>重入保护</b>：<c>Start</c> 与"重连成功"两条路径都会触发登录，
     /// 不防重入就会对同一账号登录两次 —— 连接 owner 绑定被覆盖，旧连接变成 unauthenticated 仍在发消息；</item>
-    /// <item><b>重登判据</b>：只有「曾经登录过、但**本连接**还没绑定会话」才该重新登录；
+    /// <item><b>重登判据</b>：只有「登录过、但**本连接**还没绑定会话」才该重新登录；
     /// 首次连接由业务显式 <see cref="Start"/> 触发，否则会重复登录。</item>
     /// </list>
     ///
@@ -98,7 +97,7 @@ namespace CloverEngine
         private bool _disposed;
         private bool _loginInFlight;   // 重入保护：Start 与"重连后重登"都可能触发
         private Task<bool> _loginTask; // 在途登录任务：并发调用方 await 它拿真实结果（而非把"进行中"误判成失败）
-        private bool _loggedIn;        // 曾经登录成功（跨断线保持，被踢 / 401 时复位）
+        private bool _loggedIn;        // 登录成功过（跨断线保持，被踢 / 401 时复位）
         private bool _reloginPending;  // 登录态被终止（被踢 / 401）后置位：断线重连成功时仍要自动重登
         private bool _sessionBound;    // **本连接**是否已绑定会话（登录成功 / 恢复成功 = true）
         private bool _inMap;
@@ -177,7 +176,7 @@ namespace CloverEngine
             if (_loginInFlight && _loginTask != null)
             {
                 // 不把「进行中」当「失败」：等待在途登录的真实结果再返回
-                // （原先直接返回 false，await 本方法的业务会把正在进行的登录误判为失败）。
+                // （否则 await 本方法的业务会把正在进行的登录误判为失败）。
                 Game.Logger?.Info(Tag, "登录流程已在进行中，等待在途登录完成");
                 return await _loginTask;
             }
@@ -261,7 +260,7 @@ namespace CloverEngine
                 }
 
                 // Dispose 闸门必须在 SetupSession 之前：释放后不得再落会话、置登录态，
-                // 也不得继续回调业务建角/进图（原实现没有该检查，会出现"悬空完成"）。
+                // 也不得继续回调业务建角/进图（否则会出现"悬空完成"）。
                 if (FlowDisposed()) return false;
 
                 // 登记会话：进入恢复会话态。
@@ -344,7 +343,7 @@ namespace CloverEngine
                 //      成功由 OnResumed 置位；失败由 OnResumeFailed 标记，下一次连接建立后重登。
                 //      这里不抢跑登录，否则会与自动 ResumeSession 并发（重复登录覆盖会话）。
                 //   ② 不走恢复且曾登录过（_loggedIn / _reloginPending）→ 必须重新登录，
-                //      否则会停在「已登录」但新连接未绑定会话（原实现因 _sessionBound 残留永不走这条）。
+                //      否则会停在「已登录」但新连接未绑定会话。
                 //   ③ 首次连接（未登录过）→ 由业务显式 Start() 触发，此处不动作。
                 if (WillEngineAutoResume())
                 {
@@ -382,7 +381,7 @@ namespace CloverEngine
             {
                 _sessionBound = false;
                 _inMap = false;
-                _loggedIn = false;      // 被服务端判未认证：不再是"已登录"（注释承诺的语义，原先从未置 false）
+                _loggedIn = false;      // 被服务端判未认证：不再是"已登录"
                 _reloginPending = true; // 但流程仍应登录：本次重登若失败，后续重连成功时继续自动重登
                 if (_disposed) return;
 
@@ -425,8 +424,8 @@ namespace CloverEngine
         {
             if (_disposed || _opt.EnterMapAsync == null) return;
 
-            // 与在途登录互斥：登录链同样会写 Stage / _inMap（原实现不受 _loginInFlight 守卫，
-            // 与重登并发时两边状态互相覆盖）。轮询等其收尾，超时仅告警不阻塞。
+            // 与在途登录互斥：登录链同样会写 Stage / _inMap，与重登并发时两边状态互相覆盖。
+            // 轮询等其收尾，超时仅告警不阻塞。
             if (_loginInFlight)
             {
                 Game.Logger?.Info(Tag, "有登录流程在途，等待其收尾后再重新进图");
@@ -436,7 +435,7 @@ namespace CloverEngine
             if (_disposed) return;
 
             // 先让出一帧：恢复回包与进图若同帧发出，会话凭证的落库任务可能还排在本帧
-            // 派发队列里（原实现用固定 300ms 盲等这件事；盲等在快机上纯浪费、慢机上也不够）。
+            // 派发队列里（盲等固定 300ms 在快机上纯浪费、慢机上也不够）。
             await Task.Yield();
             if (_disposed) return;
 

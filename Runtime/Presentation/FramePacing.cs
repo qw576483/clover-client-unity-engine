@@ -7,12 +7,8 @@ namespace CloverEngine
     /// **帧节奏**（帧率上限 / 垂直同步）的引擎件 —— 只做「把这两个原生设置钉死并读回校验」，
     /// ⛔ **不碰任何画质内容**（阴影 / 分辨率缩放 / LOD / 贴图限制属 <see cref="Quality"/>）。
     ///
-    /// <para><b>为什么要有它（下沉记录）</b>：能力下沉。原来全工程只有业务侧
-    /// <c>clover-project-diablo2/client/Assets/Scripts/Core/FramePacing.cs</c> 会写
-    /// <c>Application.targetFrameRate</c>（引擎里唯一的另一个写点是 <c>Quality.cs:179-181</c>，
-    /// 由 <c>Game.Quality.SetLevel</c> 触发）⇒ 业务为了一件通用事自己持有原生调用。
-    /// 本件把「读 / 写 / 读回校验 / 失败原因」收进引擎，业务侧只调用、⛔ 不留第二份
-    /// <c>Application.targetFrameRate =</c> 写入。</para>
+    /// <para><b>为什么要有它</b>：把 <c>Application.targetFrameRate</c> 的「读 / 写 / 读回校验 /
+    /// 失败原因」收在一处 —— 业务侧只调用，⛔ 不留第二份 <c>Application.targetFrameRate =</c> 写入。</para>
     ///
     /// <para><b>为什么返回 bool + out error 而不是抛异常</b>：离线自检宿主
     /// （<c>tools/probes/hosts/*</c>，非 Unity 进程）里这两个原生 API 会抛
@@ -25,16 +21,10 @@ namespace CloverEngine
     /// 每次改画质档位之后都要重新 <see cref="Pin"/>（<c>Quality.cs</c> 的
     /// <c>SetLevel</c> 也会写 <c>vSyncCount = 0</c>，两者方向一致、不冲突）。</para>
     ///
-    /// <para><b>★ 为什么"vSync 关、硬性 60fps"会让画面抖 —— 真机 A/B 实测（片 g2-resume）</b>：
+    /// <para><b>★ 为什么"vSync 关、硬性 60fps"会让画面抖</b>：
     /// 位置是 <c>f(t)</c> 的光滑函数（移动按 <c>dt</c> 积分）⇒ 每帧推进量 = <c>v·dt</c>，
-    /// **帧间隔不匀就直接变成画面推进不匀**。实测（`clover-project-diablo2`，`camjitter_drive` 逐帧 TSV，
-    /// 同一段 6 折路径、同一把量法 `camjitter_who.py`）：
-    /// ① 显示器 **100 Hz**（`Screen.currentResolution.refreshRateRatio`），配置 = 60/0 ⇒
-    ///    <c>dt</c> 8.5~62.6 ms（sd 5.0 ms，均值 17.3 ms）；相机（世界滚动）**纵向**每帧推进量
-    ///    sd = **2.97 px**（p95 4.6 px、速度 sd 136 px/s ÷ 标称 445 px/s = **31%**），
-    ///    且 <c>corr(纵向偏差, dt−均值) = 0.923</c> ⇒ **不匀就是帧时间造成的**（不是代码）；
-    /// ② 跟随链路本身**已经干净**（角色相对相机的横向 sd <b>0.19 px</b>）；
-    /// ③ 60 fps 落在 100 Hz 面板上每帧占 1.67 个刷新周期 ⇒ 呈现节拍本身也不整（60 与 100 不整除）。
+    /// **帧间隔不匀就直接变成画面推进不匀**；
+    /// 且 60 fps 落在 100 Hz 面板上每帧占 1.67 个刷新周期 ⇒ 呈现节拍本身也不整（60 与 100 不整除）。
     /// ⇒ 结论：帧节奏必须**与显示器对齐**，而刷新率只有引擎能可靠读到 ⇒ 策略放这里，
     /// 由 <see cref="RecommendVSyncCount(float)"/> 给档位（刷新率可读 ⇒ <c>vSync=1</c>，
     /// 帧交付锁到刷新率 ⇒ 帧间隔恒定）。<b>vSync 开启时平台忽略 targetFrameRate 属预期</b>。</para>
@@ -55,7 +45,7 @@ namespace CloverEngine
         public const int DefaultVSyncCount = 0;
 
         /// <summary>
-        /// **由显示器刷新率决定垂直同步档位**（纯函数，离线可断言；A/B 实测依据见类注释 ★）：
+        /// **由显示器刷新率决定垂直同步档位**（纯函数，离线可断言）：
         /// <list type="bullet">
         /// <item>刷新率可读（&gt; 0）⇒ <b>1</b>：帧交付锁到刷新率 ⇒ 帧间隔恒定（100 Hz 面板 ⇒ 10.0 ms），
         /// 世界滚动与角色位移的每帧推进量因此恒定；</item>
@@ -72,10 +62,8 @@ namespace CloverEngine
         /// </summary>
         public static float TryReadRefreshHz()
         {
-            // ⚠️ 2026-09-23 主 agent 修编译（12 个离线宿主**全部**红的唯一根因：它们都 Compile 本文件）：
-            //    `Screen.currentResolution.refreshRateRatio.value` 是 **double**（`RefreshRate.value`），
-            //    直接 return 到 `float` 签名会 **CS0266 隐式转换失败** ⇒ 整棵树编不过。
-            //    显式 `(float)` 修正，语义零改动（刷新率本身只有整数量级精度，float 完全够）。
+            // ⚠️ `RefreshRate.value` 是 **double**：不显式转 `float` 会 **CS0266 隐式转换失败**
+            //    （刷新率只有整数量级精度，float 完全够）。
             try { return (float)Screen.currentResolution.refreshRateRatio.value; }
             catch (Exception) { return 0f; }
         }

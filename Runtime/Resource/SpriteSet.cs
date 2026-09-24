@@ -2,22 +2,10 @@
 // CloverEngine · Runtime/Resource/SpriteSet.cs
 // 「批量异步预加载 → 按名同步取 → 缺失只报一次」的精灵组合件。
 //
-// 出处：clover-project-super-mario `client/Assets/Scripts/Module/Player/PlayerModule.cs:304-355`
-//   （项目里的 `SpriteSet`）。原注释记着它存在的根因：**引擎没有同步加载** ——
-//   `Game.Res.LoadAsset` 只有异步版（契约见 Runtime/Core/Contracts.cs:1028-1043），
-//   所以想"随用随取"就必须先把整套攒进缓存，这就是"先 Preload、后同步取"的由来。
-//   同处还记着"缺失静默返回 null"的代价：忘了把某个动作放进 Preload 清单的表现是
-//   **角色整段隐形，且零报错零日志**（旗杆下滑缺 Climb 帧就是这么隐形的）
-//   ⇒ 所以取不到必须报，且因为 Get 每帧都会被调用，只报一次。
-//
-// 下沉时**刻意换掉**的两处（⛔ 不是照抄，照抄会把项目专属物带进引擎）：
-//   ① 原实现自己维护 `HashSet<string> _warned` 去重 ⇒ 改用引擎既有
-//      <see cref="LogThrottle"/> 的 `*Once`（Runtime/Core/LogThrottle.cs:164-178），
-//      ⛔ 不再写第二套去重（§已有同类能力不准再起第二套）。
-//   ② 原实现回调里自己攒 `Dictionary<string, Sprite>` 强引用 ⇒ 这里只留**名字 → 路径**索引，
-//      取值走 <see cref="IResourceManager.TryGet{T}(string)"/>（纯读、不动引用计数/LRU），
-//      从而与引擎的缓存/水位记账保持一致（业务拿到的对象该由加载方持有）。
-//      代价：被缓存水位淘汰后 Get 会返回 null（会报一次，见类型注释）。
+// `Game.Res.LoadAsset` 只有异步版（契约见 Runtime/Core/Contracts.cs:1028-1043）
+//   ⇒ 想"随用随取"就必须先把整套攒进缓存，这就是"先 Preload、后同步取"的由来。
+//   取不到（Preload 清单漏了某个动作）必须报、且只报一次（Get 每帧都会被调用）：
+//   静默返回 null 的表现是**角色整段隐形，且零报错零日志**。
 //
 // 重复预加载同一路径由引擎合并：`IResourceManager.LoadAsset` 内部
 //   `JoinOrCreatePending` 把并发请求并进同一次加载（Runtime/Resource/ResourceManager.cs:205）。
@@ -53,7 +41,7 @@ namespace CloverEngine
     /// </para>
     /// <para>
     /// <b>不持有引用计数</b>：<c>Preload</c> 自己会把预热那次 <c>+1</c> 还掉
-    ///（ResourceManager.cs:536-538），本件不再额外 Release；因此条目在水位压力下可被 LRU 淘汰，
+    ///（ResourceManager.cs:536-538），本件不额外 Release；因此条目在水位压力下可被 LRU 淘汰，
     /// 淘汰后 <see cref="Get"/> 会返回 <c>null</c>（会报一次）。需要长期常驻请自行
     /// <c>Game.Res.LoadAsset</c> 持有引用。
     /// </para>

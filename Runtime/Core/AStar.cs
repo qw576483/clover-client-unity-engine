@@ -1,15 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/AStar.cs
-// 格子 A*（**8 邻接、对角需两侧都可走**）—— 回调式寻路，通用底座，下沉到引擎。
+// 格子 A*（**8 邻接、对角需两侧都可走**）—— 回调式寻路，通用底座。
 //
-// 出处：Diablo2 项目 `client/Assets/Scripts/Core/AStar.cs`（277 行，**API、语义、边界处理逐行照搬**）。
-//   唯二改写：① 命名空间 `Diablo2.Core` ⇒ `CloverEngine`；
-//             ② 日志出口 `Log.*` ⇒ 引擎 `LogThrottle` / `Game.Logger`（同源实现，见 Runtime/Core/LogThrottle.cs）。
-//   ⇒ 公开签名一个没变（`DefaultMaxNodes` / `Find` / `FindSmoothed` / `Smooth` / `HasLineOfSight` / `Describe`）。
+// 公开签名：`DefaultMaxNodes` / `Find` / `FindSmoothed` / `Smooth` / `HasLineOfSight` / `Describe`。
 //
-// 为什么用**回调**而不是直接依赖地图类型（下沉后这一点更有价值）：
+// 为什么用**回调**而不是直接依赖地图类型：
 //   引擎不认识业务的地形数据结构 —— 只要给一个 `Func<Vector2Int,bool> walkable`，任何
-//   `TileKind[,]` / 位图 / 体素切片的格子地图都能直接复用，**不必重造二进制格式**。
+//   任何格网表示（二维枚举数组 / 位图 / 体素切片）都能直接复用，**不必重造二进制格式**。
 //   （引擎的 `MapBake` 产出的是**静态**烘焙地图，与「每局随机生成」的格网语义不同，故不是替代品。）
 //
 // 接口形状（契约）：

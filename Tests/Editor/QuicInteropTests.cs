@@ -145,9 +145,6 @@ namespace CloverEngine.Tests
         /// 能力判定必须**主动探测**（<c>TryEnsureReady</c>），不能读被动缓存 <c>IsAvailable</c>。
         ///
         /// <para>
-        /// 真事故（IL2CPP 真机包）：编辑器里因为测试先探测过，QUIC"看起来能走"；
-        /// 真 Player 是全新进程、没人探测 ⇒ 判定恒 false ⇒ QUIC 被静默排除，只剩 TCP，
-        /// 而且全包**没有一条** QUIC 日志（排查靠猜）。
         /// 断言口径：能力判定结果必须与"显式探测的结果"一致 —— 若改成读被动缓存，这里就会红。
         /// </para>
         /// </summary>

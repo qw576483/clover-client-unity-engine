@@ -2,34 +2,17 @@
 // CloverEngine · Runtime/Presentation/Sound.cs
 // 音效**播放闸门**：缺失只报一次 / 单帧起播上限 / 同 clip 并发上限 / 同路径最小重播间隔。
 //
-// 出处：clover-project-cs16 项目侧的「音效发放闸门」——`client/Assets/Scripts/Module/Audio/SfxService.cs`
-//   （201 行：探测状态表 + 单帧计数 + 同音效并发滑动窗口 + 缺失告警计数）与
-//   `client/Assets/Scripts/Module/Combat/CombatAudio.cs`（97 行，更早的同款）。两份都在补引擎的三个短板：
-//     ① `clip == null` 的缺失分支（`PlaySFX` / `PlaySFXAt` / `PlayVoice` 三处 ＋ `PlayBGM` 一处）
-//        **每次调用**都裸打一条 Warn（`Game.Logger` 直发，tag `Sound`）⇒ 脚步 / 命中 / 蜂鸣这类每秒多次的
-//        高频路径，只要某个音效没落地就把日志刷爆（真问题反而看不见）；
-//     ② 全类**没有**任何"单帧 / 同 clip 并发"闸门 ⇒ 一帧打进几十个音效就会把音源池（32）占满，
-//        池满之后 `GetAvailableSource` 只能丢弃后面的音效（枪声/脚步互相顶掉）；
-//     ③ 没有"缺失只告警一次"的口径（每次调用都报）。
-//   另有一处**日志通道**上的不一致（不是上面三个短板之一，但同属"通用能力该有却没有"）：
-//   `GetAvailableSource` 的池满告警自带一个 `bool` 只报一次，而引擎已有的
-//   `LogThrottle.WarnOnce` / `WarnThrottled` 在本文件里**一处都没用上**（本轮一并归零，见语义约束 ⑥）。
-//   本片把这三件收敛进引擎（`结构规则.md` §4.4：**已有能力不够用时优先扩展原实现**，⛔ 不准平行再起一套）。
-//
-// ⛔ **没有下沉**（那些是业务）：
-//   · 音效名表与路径命名口径（`sfx/<短名>` 由项目的 `CsAudioTuning` 约定）；
-//   · 分组音量值 / `cs.*` 设置键 / 音量应用策略（轮询、master×sfx）；
+// ⛔ **下列内容不在本件**（那些是业务）：
+//   · 音效名表与路径命名口径（`sfx/<短名>` 由业务约定）；
+//   · 分组音量值 / 设置键 / 音量应用策略（轮询、master×sfx）；
 //   · "开局预热哪些音效"（`Prewarm` 的列表）；
-//   · 项目侧"探测一次、Ready 才播"的缓存 —— 见下一段「为什么不需要第三套」。
-//
-// 为什么下沉：闸门是**任何项目都要的底座**（高频音效缺失要防刷屏、一帧多音效要限流），留在项目侧
-//   ⇒ 每个新项目都要再抄一遍（cs16 已经抄了两份，且两份的告警文案 / 阈值口径已经不一致）。
+//   · 项目侧"探测一次、Ready 才播"的缓存。
 //
 // 语义约束（改一条 = 语义漂移；与 `LogThrottle.cs` 的版式一致）：
-//   ① **三个闸门默认 `0` = 不限 = 与下沉前逐字一致**：不设闸门时，本文件对播放路径的
-//      行为（起播次数 / 日志 / 资源引用计数 / 音源池取源顺序）一个字节都没有变化。
-//      第 3 个（同一路径最小重播间隔）见 <see cref="SoundRepeatGate"/> —— 自 diablo2 的
-//      `Module/Audio/SfxThrottle.cs` 下沉，口径逐条对齐（可注入时钟 / 空键放行 / 时间源不可用即惰性）。
+//   ① **三个闸门默认 `0` = 不限**：不设闸门时，本文件对播放路径的
+//      行为（起播次数 / 日志 / 资源引用计数 / 音源池取源顺序）保持不变。
+//      第 3 个（同一路径最小重播间隔）见 <see cref="SoundRepeatGate"/>
+//      （可注入时钟 / 空键放行 / 时间源不可用即惰性）。
 //   ② 三个闸门**只管 SFX / Voice 的起播**（`PlaySFX` / `PlaySFXAt` / `PlayVoice`）：
 //      BGM / 分组音量 / 淡入淡出 / `TakeSource` 的池逻辑 / `Dispose` 语义**一律不动**。
 //   ③ 超限 ⇒ **丢弃该次播放**（⛔ 不排队、⛔ 不打断正在播的音源），并**限频告警**
@@ -38,13 +21,13 @@
 //      路径含分组前缀（`Sound/SFX/…` / `Sound/Voice/…`）⇒ 不同分组互不干扰。
 //   ⑤ 缺失（`clip == null`）**整进程只报一次 / 路径**：`LogThrottle.WarnOnce("Sound", "missing:<path>", …)`，
 //      message 文案与 `path` 变量保留原样。**四处 `clip == null` 一视同仁**（`PlayBGM` / `PlaySFX` /
-//      `PlaySFXAt` / `PlayVoice`）—— BGM 那条**只换了告警频率**（每次 ⇒ 每路径一次），
-//      BGM 的播放 / 淡入淡出 / 请求序号判定一行未动。资源加载失败自身的那条 Error 由资源层负责
+//      `PlaySFXAt` / `PlayVoice`）：BGM 那条的告警频率同为每路径一次；BGM 的播放 / 淡入淡出 /
+//      请求序号判定不受影响。资源加载失败自身的那条 Error 由资源层负责
 //      （它在 `ResourceManager.CompletePending`，**不在本文件**；业务侧要"问一句在不在"用
 //      `Game.Res.Exists`，那是引擎的按路径缓存，不属本闸门）。
-//   ⑥ 本文件**不再有裸 `Game.Logger?.Warn`**：池满告警（`GetAvailableSource`）也改走
-//      `LogThrottle.WarnOnce("Sound", "pool.exhausted", …)` —— 但**池逻辑与 `_poolExhaustedWarned`
-//      原样保留**（只换发射通道，"只报一次"的原语义逐字不变）。
+//   ⑥ 本文件所有告警一律走 `LogThrottle`（池满分支见 `GetAvailableSource` 的
+//      `LogThrottle.WarnOnce("Sound", "pool.exhausted", …)`）；池逻辑与 `_poolExhaustedWarned`
+//      不变（"只报一次"语义不变）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System;
@@ -54,7 +37,7 @@ using UnityEngine;
 
 namespace CloverEngine
 {
-    // 契约（SoundGroup / ISoundManager）已下沉到 Runtime/Core/PresentationContracts.cs。
+    // 契约（SoundGroup / ISoundManager）见 Runtime/Core/PresentationContracts.cs。
 
     /// <summary>
     /// 协程宿主：GameObject 本身不能启动/停止协程（那是 MonoBehaviour 的能力），
@@ -68,13 +51,12 @@ namespace CloverEngine
     internal class SoundManager : ISoundManager
     {
         /// <summary>
-        /// SFX 音源池容量。★ **2026-09-19 由 8 提到 32**（引擎侧改动，登记见
-        /// `clover-project-diablo2/tools/ai-skill/constraints.md` 的「本项目依赖的引擎修复」表）。
+        /// SFX 音源池容量。
         /// <para>
-        /// 起因：`clover-project-diablo2` 实测「一次命中会同时触发 挥砍 / 命中 / 受击 / 死亡 / 掉落」
-        /// 若干音效，8 个源在 AOE / 群体战下被占满 ⇒ 后续音效走 <see cref="GetAvailableSource"/>
-        /// 的池满分支被**静默丢弃**（日志 `音效池（8 个音源）已全部占用，本次播放被丢弃`）。
-        /// 多挂的 24 个 <see cref="AudioSource"/> 空载不耗 CPU，**无行为副作用**（纯增益）。
+        /// 取值依据：「一次命中会同时触发 挥砍 / 命中 / 受击 / 死亡 / 掉落」
+        /// 若干音效，池不足时在 AOE / 群体战下会被占满 ⇒ 后续音效走 <see cref="GetAvailableSource"/>
+        /// 的池满分支被**静默丢弃**。
+        /// <see cref="AudioSource"/> 空载不耗 CPU，**无行为副作用**（纯增益）。
         /// </para>
         /// </summary>
         private const int SfxPoolSize = 32;
@@ -86,13 +68,12 @@ namespace CloverEngine
         private readonly Dictionary<SoundGroup, bool> _mutes = new();
         private readonly GameObject _root;
         private readonly MonoBehaviour _host;
-        // 淡入淡出按**音源**为键：原实现按分组（BGM）为键，切 BGM 时"新曲淡入"与"旧曲淡出"
-        // 共用同一个槽位，第二次 StartFade 会把刚启动的淡入协程 Stop 掉（新 BGM 音量停在 ≈0）。
+        // 淡入淡出按**音源**为键：⛔ 不能按分组（BGM）为键 —— 切 BGM 时"新曲淡入"与"旧曲淡出"
+        // 会共用同一个槽位，第二次 StartFade 会把刚启动的淡入协程 Stop 掉（新 BGM 音量停在 ≈0）。
         private readonly Dictionary<AudioSource, Coroutine> _fades = new();
-        // 每个音源当前 clip 对应的资源路径：换 clip 时归还旧引用、Dispose 时全部归还
-        //（原实现从不 Release，每个播放过的音频引用计数只增不减、永驻资源缓存）。
+        // 每个音源当前 clip 对应的资源路径：换 clip 时归还旧引用、Dispose 时全部归还。
         private readonly Dictionary<AudioSource, string> _clipPaths = new();
-        // 每个音源当前播放的音频分组：原实现靠 clip 名猜分组（含 "Voice" 才算人声），命名不匹配就设错音量。
+        // 每个音源当前播放的音频分组（播放时记录；⛔ 不靠 clip 名猜分组：命名不匹配就设错音量）。
         private readonly Dictionary<AudioSource, SoundGroup> _srcGroups = new();
         // PlayBGM 的请求序号：异步加载完成时若已有更新的请求（或已 Dispose）则丢弃旧结果（防双 BGM 同播 / 旧曲覆盖新曲）。
         private int _bgmRequestId;
@@ -103,7 +84,7 @@ namespace CloverEngine
         private int _framePlays;
         private int _frameOfPlays = -1;
         // 被 App.Pause 真正暂停过的音源。AudioSource.isPlaying 在暂停态返回 false，
-        // 恢复时不能靠它反推"哪些原本在播"，必须自己记账。
+        // 恢复时不能靠它反推"哪些正在播"，必须自己记账。
         private readonly List<AudioSource> _appPausedSources = new();
 
         /// <summary>
@@ -125,7 +106,7 @@ namespace CloverEngine
             for (var i = 0; i < SfxPoolSize; i++)
             {
                 // ★ 每个 SFX 音源挂**独立子节点**：3D 音效要按各自的位置播放；
-                //   原实现全部挂在 [Sound] 根节点上，PlaySFXAt 设 transform.position 等于
+                //   若共用 [Sound] 根节点，PlaySFXAt 设 transform.position 等于
                 //   把整个根（含 BGM 与其它音效）搬走，多次 3D 音效互相抢位。
                 var go = new GameObject("SFX" + i);
                 go.transform.SetParent(_root.transform, false);
@@ -141,7 +122,6 @@ namespace CloverEngine
             }
 
             // 订阅应用级暂停 / 恢复（发布方 EngineRunner.OnApplicationPause，事件名见 CloverEvents.App）。
-            // 这两个事件此前全仓只有 Emit、没有订阅者（死事件）；这里接上引擎内的最小消费者：
             // 切后台时把正在播的音源暂停、回前台恢复，避免"退到后台还在响 / 回来时状态错乱"。
             // Game.Event 为 null 时静默跳过（EditMode 里直接 new SoundManager() 的情形）。
             Game.Event?.On(CloverEvents.App.Pause, OnAppPause);
@@ -183,12 +163,12 @@ namespace CloverEngine
             _appPausedSources.Clear();
         }
 
-        // ── 播放闸门：三个都可配，默认 0 = 不限 = 与下沉前逐字一致 ──────────
+        // ── 播放闸门：三个都可配，默认 0 = 不限 ──────────
         //
         // 为什么要暴露在 ISoundManager 上（而不是只做 SoundManager 的内部字段）：
         // 实现类 internal（G1），业务只拿得到 `Game.Sound`（接口）—— 挂在实现类上等于"业务配不了"，
         // 那闸门就只能永远用默认值（= 没有闸门），等于白做。
-        // 取值来源仍是**业务**（例如 cs16 的 `CsAudioTuning.MaxPlaysPerFrame` / `MaxConcurrentPerClip`），
+        // 取值来源仍是**业务**（`MaxPlaysPerFrame` / `MaxConcurrentPerClip` 由业务配），
         // 引擎这里只是执行口径（与 `LogThrottle` 的 `everyN` 由业务传入同一分工）。
 
         /// <inheritdoc/>
@@ -281,8 +261,6 @@ namespace CloverEngine
                 {
                     // 缺失只报一次/路径：BGM 也是 `clip == null` 的缺失分支，与下面三处
                     // SFX / Voice 同口径 —— 文件头语义约束 ⑤ 说的就是**所有**缺失只报一次。
-                    // 原先这里是**每次 PlayBGM** 都裸打一条 Warn（缺 BGM 的工程每次切曲都刷一条）。
-                    // 只换日志发射通道：BGM 的播放 / 淡入淡出 / 请求序号判定一行未动。
                     LogThrottle.WarnOnce("Sound", "missing:" + path, $"BGM 加载失败（clip 为空）：{path}");
                     return;
                 }
@@ -345,12 +323,11 @@ namespace CloverEngine
             {
                 if (clip == null)
                 {
-                    // 缺失只报一次/路径：原先是**每次调用**一条裸 Warn —— 脚步 / 命中
-                    // 这种每秒多次的高频路径一旦某个音效没落地，日志就被它刷爆（真问题反而看不见）。
+                    // 缺失只报一次/路径（脚步 / 命中这类每秒多次的高频路径，逐次报会把日志刷爆）。
                     LogThrottle.WarnOnce("Sound", "missing:" + path, $"音效加载失败（clip 为空）：{path}");
                     return;
                 }
-                // 播放闸门（默认 0 = 不限 ⇒ 与下沉前逐字一致）；超限则归还本次加载的引用并丢弃。
+                // 播放闸门（默认 0 = 不限）；超限则归还本次加载的引用并丢弃。
                 if (!AllowPlay(path))
                 {
                     Game.Res?.Release(path);
@@ -371,11 +348,11 @@ namespace CloverEngine
             {
                 if (clip == null)
                 {
-                    // 同上：缺失只报一次/路径，⛔ 不再是每次一条裸 Warn。
+                    // 同上：缺失只报一次/路径。
                     LogThrottle.WarnOnce("Sound", "missing:" + path, $"3D 音效加载失败（clip 为空）：{path}");
                     return;
                 }
-                // 播放闸门（默认 0 = 不限 ⇒ 与下沉前逐字一致）；超限则归还本次加载的引用并丢弃。
+                // 播放闸门（默认 0 = 不限）；超限则归还本次加载的引用并丢弃。
                 if (!AllowPlay(path))
                 {
                     Game.Res?.Release(path);
@@ -397,11 +374,11 @@ namespace CloverEngine
             {
                 if (clip == null)
                 {
-                    // 同上：缺失只报一次/路径，⛔ 不再是每次一条裸 Warn。
+                    // 同上：缺失只报一次/路径。
                     LogThrottle.WarnOnce("Sound", "missing:" + path, $"人声加载失败（clip 为空）：{path}");
                     return;
                 }
-                // 播放闸门（默认 0 = 不限 ⇒ 与下沉前逐字一致）；超限则归还本次加载的引用并丢弃。
+                // 播放闸门（默认 0 = 不限）；超限则归还本次加载的引用并丢弃。
                 if (!AllowPlay(path))
                 {
                     Game.Res?.Release(path);
@@ -455,7 +432,7 @@ namespace CloverEngine
         public void StopAll()
         {
             // 先停掉在途淡入淡出协程：否则被停音源的协程继续推进并写 volume，
-            // 甚至到点后把刚重启的音源再 Stop 一次（原实现只停音源、不清 _fades）。
+            // 甚至到点后把刚重启的音源再 Stop 一次。
             foreach (var kv in _fades)
                 if (kv.Value != null && _host != null) _host.StopCoroutine(kv.Value);
             _fades.Clear();
@@ -516,7 +493,7 @@ namespace CloverEngine
 
             StopAll();
 
-            // 归还全部音频的资源引用（原实现只置 clip=null，引用计数只增不减、音频永驻缓存）。
+            // 归还全部音频的资源引用（只置 clip=null 会让引用计数只增不减、音频永驻缓存）。
             foreach (var kv in _clipPaths)
                 Game.Res?.Release(kv.Value);
             _clipPaths.Clear();
@@ -546,7 +523,7 @@ namespace CloverEngine
             {
                 if (!src.isPlaying) continue;
 
-                // 用**播放时记录的分组**判定（原实现靠 clip 名是否含 "Voice"/"_voice" 猜分组：
+                // 用**播放时记录的分组**判定（⛔ 不靠 clip 名是否含 "Voice"/"_voice" 猜分组：
                 // 命名不含该词的语音会被当音效处理，音量 / 静音设置对不上）。
                 if (!_srcGroups.TryGetValue(src, out var srcGroup) || srcGroup != group) continue;
 
@@ -573,7 +550,7 @@ namespace CloverEngine
                 if (source == null) yield break;
 
                 // 用 unscaledDeltaTime：timeScale=0（暂停 / 结算屏）时淡入淡出仍要走完，
-                // 否则音量卡在中途、_fades 项也永远清不掉（同 Timer unscaled 教训）。
+                // 否则音量卡在中途、_fades 项也永远清不掉。
                 elapsed += Time.unscaledDeltaTime;
                 var t = Mathf.Clamp01(elapsed / duration);
                 source.volume = Mathf.Lerp(from, to, t);
@@ -596,10 +573,8 @@ namespace CloverEngine
                 if (!src.isPlaying) return src;
             }
 
-            // 池全忙：原实现强制返回 _sfxPool[0]，把正在播放的音效 / 人声**静默打断**。
-            // 改为丢弃本次播放并留一次告警（只报一次，避免高频音效刷屏）。
-            // 只换**日志发射通道**（裸 Warn ⇒ LogThrottle）：取源失败后 return null 的池逻辑
-            // 一行未动，`_poolExhaustedWarned` 也**原样保留** —— 于是"只报一次"的语义逐字不变。
+            // 池全忙：丢弃本次播放并留一次告警（只报一次，避免高频音效刷屏）。
+            // ⛔ 不许改为强制返回 _sfxPool[0] —— 那会把正在播放的音效 / 人声**静默打断**。
             if (!_poolExhaustedWarned)
             {
                 _poolExhaustedWarned = true;
@@ -615,27 +590,24 @@ namespace CloverEngine
     /// <see cref="SoundManager.MaxPlaysPerFrame"/>（单帧起播上限）、
     /// <see cref="SoundManager.MaxConcurrentPerClip"/>（同路径真并发上限）互补。
     /// <para>
-    /// ⛔ <b>缺陷</b>（★ 影响所有项目）：引擎原先只有"单帧上限"与"同时播放上限"，**没有**
-    /// "同一音效 N 秒内不许重播"这一维；某个键被高频请求（实测 portal 约 52 次/秒）时，
-    /// 32 个音源会在 ~0.6s 内被它占满 ⇒ 同一时刻的 hit / monster_attack 在
-    /// <see cref="SoundManager.GetAvailableSource"/> 的池满分支被**静默丢弃**。
+    /// ⛔ <b>为什么需要这一维</b>（★ 影响所有项目）：只有"单帧上限"与"同时播放上限"时，
+    /// 某个键被高频请求（实测 portal 约 52 次/秒）会让 32 个音源在 ~0.6s 内被它占满 ⇒
+    /// 同一时刻的 hit / monster_attack 在 <see cref="SoundManager.GetAvailableSource"/> 的池满分支
+    /// 被**静默丢弃**。
     /// </para>
-    /// <para><b>最小复现</b>：保持 <see cref="MinRepeatSecondsPerClip"/> = <c>0</c>（不限），
+    /// <para><b>取值行为</b>：保持 <see cref="MinRepeatSecondsPerClip"/> = <c>0</c>（不限）时，
     /// 对同一 clip 连发请求超过 32 次 ⇒ 日志出现 <c>音效池（32 个音源）已全部占用，本次播放被丢弃</c>，
-    /// 后续其它音效全被丢弃。</para>
-    /// <para><b>修复后自证</b>：置 <see cref="MinRepeatSecondsPerClip"/> = <c>0.1f</c> 后，同一键
-    /// 100ms 内的第 2 / 3 次起播被丢弃（<see cref="DropCount"/> 累加），其它键照常放行；
-    /// 默认 <c>0</c> ⇒ 不记账、恒定放行（与另外两个闸门同口径）。等价性由项目侧
-    /// <c>SfxThrottle</c> 的边界用例在改前/改后逐行比对（脚本见
-    /// <c>clover-project-diablo2/.ai-tmp/test/</c>）。</para>
+    /// 后续其它音效全被丢弃；置 <c>0.1f</c> 后，同一键 100ms 内的第 2 / 3 次起播被丢弃
+    /// （<see cref="DropCount"/> 累加），其它键照常放行；默认 <c>0</c> ⇒ 不记账、恒定放行
+    /// （与另外两个闸门同口径）。</para>
     /// <para><b>已知边界 / 精度限制</b>：时间源不可用（时钟为 <c>null</c> 且 Unity 时钟抛异常 —— 即非
-    /// Unity 宿主，同 <see cref="LogThrottle"/> 记录的坑；或取值 <c>&lt;= 0</c>）⇒ **闸门惰性（不丢弃）**，
+    /// Unity 宿主，同 <see cref="LogThrottle"/> 的时钟降级口径；或取值 <c>&lt;= 0</c>）⇒ **闸门惰性（不丢弃）**，
     /// 宁可漏节流也不许吞掉正常音效；时钟回退（<c>now &lt; last</c>）按"间隔不足"丢弃。
     /// ⛔ <b>不许</b>在热路径裸读 <c>Time.realtimeSinceStartup</c> / <c>Time.unscaledTime</c>
     /// 而不接异常 —— 非 Unity 宿主会崩。非线程安全，主线程使用。</para>
-    /// <para><b>用法 + 首个消费方</b>：业务置 <c>CloverEngine.SoundRepeatGate.MinRepeatSecondsPerClip</c>
+    /// <para><b>用法</b>：业务置 <c>CloverEngine.SoundRepeatGate.MinRepeatSecondsPerClip</c>
     /// （默认 <c>0</c> = 不限；契约上不去 <see cref="ISoundManager"/> 是因为闸门状态是**全进程共享的静态计时表**，
-    /// 与另外两个"实例可配"的闸门分工不同 —— 见 `结构规则.md` §4.4）。首个消费方 =
+    /// 与另外两个"实例可配"的闸门分工不同 —— 见 `结构规则.md` §4.4）。引擎内消费点 =
     /// <see cref="SoundManager.AllowPlay"/>（本文件）；离线自检请注入
     /// <see cref="Clock"/>（<c>() =&gt; 秒</c>）以获得确定性计时。</para>
     /// </summary>
@@ -665,8 +637,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 是否丢弃本次起播：距同一 <paramref name="key"/> 上次**被允许起播**的间隔
-        /// <c>&lt; intervalSeconds</c> ⇒ <c>true</c>。语义逐条对齐项目侧 <c>SfxThrottle.ShouldDrop</c>
-        /// （出处 `clover-project-diablo2/client/Assets/Scripts/Module/Audio/SfxThrottle.cs`，本方法即其执行口径）：
+        /// <c>&lt; intervalSeconds</c> ⇒ <c>true</c>。语义逐条：
         /// <paramref name="intervalSeconds"/> <c>&lt;= 0</c>（= 不限）/ 空 <c>key</c> / 时间源不可用 ⇒ <c>false</c>（放行）；
         /// 只有"被允许"的那一次刷新计时 ⇒ 被丢弃的请求不会把窗口越推越远（不会造成"永久静音"）。
         /// </summary>

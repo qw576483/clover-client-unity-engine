@@ -3,30 +3,26 @@
 // **程序化瓦片地图**的通用生成算法（与题材无关）：块级迷宫（全连通 + 环路）+ 按"四边开口 + 镜像"
 // 拼块（含盖章叠加）。⛔ 块库 / 组码 / 方向位语义 / 原版规则表**全部由调用方以数据 + 委托传入**。
 //
-// 出处：clover-project-diablo2 `client/Assets/Scripts/Module/Map/`：
-//   ① 块级随机 DFS 生成树 + 少量环路（保证全连通）
-//      `MapGenCave.cs:109-154`（`conn[slotsX, slotsY, 4]` / `need[slotsX, slotsY]` / `visited` /
-//       `Stack<Vector2Int>` DFS / `LoopMin..LoopMax` 随机环路）、`MapGenCave.cs:568-582`（`Connect`
-//      双向对称 + `need |= DirBits` / `Opposite`）、`:584-596`（`PopCount` / `DescribeMask`）；
-//   ② 按 tile 四边开口 + 镜像拼 tileset
-//      `MapGenWilderness.cs:264-356`（周圈槽位的四边要求：**朝外闭 + 沿环开 + 朝内开**）、
-//      `:388-458`（两轮蓄水池抽样：先"四条边全中"、再放宽为"朝外那条闭"；`EffectiveOpen` 翻 = 换边）、
-//      `:719-755`（`Stamp` 盖章：逐格解出地形 / 分类 / 地面键 / 物件键，纯可走格与"原版什么都没有"的格不写）、
-//      `:550-566`（`NearestWalkable` 环形搜索）。
-//   ⇒ 本类逐条复刻上述**算法与判据**（连"候选顺序 = 方向下标升序""y 索引在前"这类细节都保留），
-//     只把「槽/块/格长什么样、写下去算什么」换成委托与只读数据。
+// 本类实现的**算法与判据**（"候选顺序 = 方向下标升序""y 索引在前"这类细节即契约）：
+//   ① 块级随机 DFS 生成树 + 少量环路（保证全连通）：连通位 `conn[slotsX, slotsY, 4]` +
+//      四边要求 `need[slotsX, slotsY]` + `visited` + `Stack<Vector2Int>` DFS + `LoopMin..LoopMax` 随机环路；
+//      连通须双向对称（两侧各加开口位）；
+//   ② 按 tile 四边开口 + 镜像拼 tileset：周圈槽位的四边要求 **朝外闭 + 沿环开 + 朝内开**；
+//      两轮蓄水池抽样（先"四条边全中"、再放宽为"朝外那条闭"；翻转 = 换边）；
+//      盖章（逐格解出地形 / 分类 / 地面键 / 物件键，纯可走格与"原版什么都没有"的格不写）；
+//      环形搜索取最近可走格。
+//   ⇒ 只把「槽/块/格长什么样、写下去算什么」换成委托与只读数据。
 //
-// 为什么下沉：程序化地图是**跨项目共性**（洞穴 / 荒野 / 地牢 / 战棋关卡都要），
-//   而它最容易出的两类缺陷都是静默的：**连通性缺口**（玩家卡在走不到的口袋）与
-//   **开口拼接错位**（走廊接不上、崖壁断开）。这两类判据一旦各项目各写一份，改一处必漏一处。
+// ★ 适用面与静默失效面：程序化地图（洞穴 / 荒野 / 地牢 / 战棋关卡）最容易出的两类缺陷都是静默的：
+//   **连通性缺口**（玩家卡在走不到的口袋）与**开口拼接错位**（走廊接不上、崖壁断开）——
+//   本件把这两类判据集中在一处。
 //
-// 用法 + 首个消费方：
+// 用法：
 //   var loops = TilemapGenUtil.TryBuildSlotMaze(rng, sx, sy, 2, 5, out var conn, out var need, out var visited, out var added);
 //   need[0, gateSlotY] |= Dir4Mask.W;                       // 强制开口由调用方自己 |=（例：洞口朝西）
 //   TilemapGenUtil.RingSlotRequirements(i, j, cells, out var rn, out var rs, out var rw, out var re);
 //   TilemapGenUtil.TryPickByEdges(rng, pieces, groupBorder, rn, rs, rw, re, out var idx, out var fx, out var fy, out var exact);
 //   var blocked = TilemapGenUtil.StampPiece(pw, ph, fx, fy, si, sj, pitch, mapW, mapH, Decode, WriteCell);
-//   项目侧 `Module/Map/{MapGenCave, MapGenWilderness}` 是它的薄封装（收尾片接线，本片不改项目文件）。
 //
 // 边界（⛔ 防止当万能药用）：
 //   · **不含任何素材 / 区域 / 块名 / 组码含义** —— 组码与方向位对引擎而言只是整数与位掩码；
@@ -55,7 +51,7 @@ namespace CloverEngine
         E = 3,
     }
 
-    /// <summary>四方向位掩码（值 = <c>1 &lt;&lt; (int)Dir4</c>；出处 `MapGenCave.cs:45` 的 <c>DirBits</c>）。</summary>
+    /// <summary>四方向位掩码（值 = <c>1 &lt;&lt; (int)Dir4</c>）。</summary>
     [System.Flags]
     public enum Dir4Mask
     {
@@ -78,7 +74,7 @@ namespace CloverEngine
         All = N | S | W | E,
     }
 
-    /// <summary>某槽位对某条边的要求（<c>Free</c> = 不要求；出处 `MapGenWilderness.cs:371-381` 的 <c>Req</c>）。</summary>
+    /// <summary>某槽位对某条边的要求（<c>Free</c> = 不要求）。</summary>
     public enum EdgeRequirement
     {
         /// <summary>不要求。</summary>
@@ -91,7 +87,7 @@ namespace CloverEngine
         Closed = 2,
     }
 
-    /// <summary>一块自身的四边开口（出处 `MapGenWildLayout.Piece.OpenN/S/W/E`）。</summary>
+    /// <summary>一块自身的四边开口。</summary>
     public readonly struct PieceEdges
     {
         /// <summary>北边是否开通。</summary>
@@ -190,11 +186,11 @@ namespace CloverEngine
         /// <summary>方向 → 位掩码（<c>1 &lt;&lt; (int)dir</c>）。</summary>
         public static Dir4Mask Bit(Dir4 dir) => (Dir4Mask)(1 << (int)dir);
 
-        /// <summary>反方向（<c>N↔S</c>、<c>W↔E</c>；出处 `MapGenCave.cs:578-582`）。</summary>
+        /// <summary>反方向（<c>N↔S</c>、<c>W↔E</c>）。</summary>
         public static Dir4 Opposite(Dir4 dir)
             => dir == Dir4.N ? Dir4.S : (dir == Dir4.S ? Dir4.N : (dir == Dir4.W ? Dir4.E : Dir4.W));
 
-        /// <summary>掩码里置位的方向个数（出处 `MapGenCave.cs:584-589`）。</summary>
+        /// <summary>掩码里置位的方向个数。</summary>
         public static int PopCount(Dir4Mask mask)
         {
             var n = 0;
@@ -205,7 +201,7 @@ namespace CloverEngine
             return n;
         }
 
-        /// <summary>掩码 → <c>"NSEW"</c> 子序列（空 = <c>"(无)"</c>；出处 `MapGenCave.cs:591-596`，供日志用）。</summary>
+        /// <summary>掩码 → <c>"NSEW"</c> 子序列（空 = <c>"(无)"</c>；供日志用）。</summary>
         public static string DescribeMask(Dir4Mask mask)
         {
             var s = string.Empty;
@@ -221,7 +217,7 @@ namespace CloverEngine
         // ── ① 块级迷宫 ────────────────────────────────────────────────────────
 
         /// <summary>
-        /// 块级迷宫：**随机 DFS 生成树（保证全连通）+ 少量环路**（出处 `MapGenCave.cs:109-154`）。
+        /// 块级迷宫：**随机 DFS 生成树（保证全连通）+ 少量环路**。
         /// <para>返回 <c>false</c> = 入参非法（<paramref name="rng"/> 为 null / 槽数为非正），
         /// 此时三个 out 参数分别为 <c>null / null / 0</c>（⛔ 不产生"半个迷宫"）。</para>
         /// <para>⛔ 强制开口（如"洞口那槽必须朝西开通"）由调用方在返回的 <c>requiredOpen</c> 上自行
@@ -318,7 +314,7 @@ namespace CloverEngine
                 var dir = (Dir4)rng.Next(DirCount);
                 var nx = si + Dx(dir);
                 var ny = sj + Dy(dir);
-                if (nx < 0 || ny < 0 || nx >= slotsX || ny >= slotsY) continue;   // 出界：这次作废（同出处）
+                if (nx < 0 || ny < 0 || nx >= slotsX || ny >= slotsY) continue;   // 出界：这次作废
                 if (conn[si, sj, (int)dir]) continue;                             // 已连通：跳过
                 ConnectSlots(conn, need, si, sj, dir);
                 addedLoops++;
@@ -331,8 +327,7 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 双向连通一个槽对（<c>conn</c> 对称置位 + <c>need</c> 两侧各加开口位；
-        /// 出处 `MapGenCave.cs:568-576`）。
+        /// 双向连通一个槽对（<c>conn</c> 对称置位 + <c>need</c> 两侧各加开口位）。
         /// </summary>
         /// <returns>落位成功返回 true；越界 / 数据结构非 <c>[,,4]</c> 返回 false 并留痕。</returns>
         public static bool ConnectSlots(bool[,,] connections, Dir4Mask[,] requiredOpen, int slotX, int slotY, Dir4 dir)
@@ -367,8 +362,7 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 连通性自检：从槽 (0,0) 起 BFS，返回是否**全连通**（出处 `MapGenCave.cs:256-260` 的
-        /// `map.VerifyConnectivity` 的块级对应物 —— 离线判据，不必进 Play）。
+        /// 连通性自检：从槽 (0,0) 起 BFS，返回是否**全连通**（离线判据，不必进 Play）。
         /// </summary>
         /// <param name="connections"><c>[slotsX, slotsY, 4]</c> 连通位。</param>
         /// <param name="unreachableSlots">出参：从 (0,0) 走不到的槽数（全连通应为 0）。</param>
@@ -417,7 +411,7 @@ namespace CloverEngine
         /// <summary>
         /// 周圈（边界环）某槽位的**四边要求**：**朝外的那条边必须闭**（崖壁朝地图外圈）、
         /// **沿环上相邻的两条边必须开**（崖壁带连续、周圈能走通）、**朝内那条边必须开**（内部接得上）。
-        /// <para>索引约定（出处 `MapGenWilderness.cs:294-330`）：<paramref name="i"/> = 列（0 = 西）、
+        /// <para>索引约定：<paramref name="i"/> = 列（0 = 西）、
         /// <paramref name="j"/> = 行（**0 = 北**，`cells-1` = 南）。</para>
         /// <para>非周圈槽位（i、j 都既不是 0 也不是 cells-1）四条边全 <c>Free</c>。</para>
         /// </summary>
@@ -471,7 +465,7 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 翻之后的四边开口：**左右翻交换 W/E，上下翻交换 N/S**（出处 `MapGenWilderness.cs:451-458`）。
+        /// 翻之后的四边开口：**左右翻交换 W/E，上下翻交换 N/S**。
         /// <para>⛔ 这是"镜像 == 原版对每条边用不同朝向的块"的全部实现 —— 翻错一边就会让走廊接不上，
         /// 且**不报错**（只会看到"这条路走不通"）。</para>
         /// </summary>
@@ -484,7 +478,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 在「<paramref name="group"/> 组 × 左右翻 × 上下翻」里挑一块满足四边要求的（**蓄水池抽样**，
-        /// 一次遍历、均匀随机；出处 `MapGenWilderness.cs:388-437`）。
+        /// 一次遍历、均匀随机）。
         /// <para>两轮：第一轮要求四条边**全部**命中；全不中时放宽为**只要求"要求闭的边确实是闭的"**
         /// （并降频 Warn 一次）。仍不中 ⇒ 返回 <c>false</c>（调用方自行兜底，如任取一块）。</para>
         /// <para><paramref name="exact"/> = 挑中的这块是否**精确**满足四条边（放宽分支下为 false，
@@ -556,7 +550,7 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 在某一组里**任取一块**（蓄水池抽样；出处 `MapGenWilderness.cs:463-470` 的 <c>PickOne</c>）。
+        /// 在某一组里**任取一块**（蓄水池抽样）。
         /// </summary>
         /// <returns>下标；该组一块都没有时返回 <c>-1</c> 并降频 Warn。</returns>
         public static int PickByGroup(Rng rng, IReadOnlyList<EdgePiece> pieces, int group)
@@ -584,11 +578,11 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 把一块**叠加**到槽 <c>(slotX, slotY)</c> 上（出处 `MapGenWilderness.cs:719-755` 的 `Stamp`）：
+        /// 把一块**叠加**到槽 <c>(slotX, slotY)</c> 上：
         /// <para>· 该块里"纯可走"的格（<c>Kind == '.'</c>）**不写** —— 那几格本来就是引擎铺的基底；</para>
         /// <para>· 该块里"原版什么都没有"的格（<c>Kind == ' '</c> 且地面键与物件键都空）也**不写**；</para>
         /// <para>· 只有"真的画了东西"的格才调 <paramref name="write"/>（地面 / 物件键照抄原版；地面为空
-        /// 的格由调用方保留已有地面 —— 那是项目侧 `SetTiles` 的事，引擎只把空串如实传出去）。</para>
+        /// 的格由调用方保留已有地面 —— 那是调用方写格逻辑的事，引擎只把空串如实传出去）。</para>
         /// <para>翻：<paramref name="flipY"/> ⇒ 块的"南半"落到本槽低 gy；<paramref name="flipX"/> ⇒ 列序左右翻转。</para>
         /// </summary>
         /// <returns>本次写入的格数（**阻挡与否由调用方在 `write` 里决定**，引擎不数它）。</returns>
@@ -636,8 +630,7 @@ namespace CloverEngine
         // ── ③ 环形搜索 ───────────────────────────────────────────────────────
 
         /// <summary>
-        /// 离 <c>(cx, cy)</c> 最近的、满足 <paramref name="isWalkable"/> 的格（**环形搜索**，半径内逐环展开；
-        /// 出处 `MapGenCave.cs:550-566` 的 `NearestWalkable`）。
+        /// 离 <c>(cx, cy)</c> 最近的、满足 <paramref name="isWalkable"/> 的格（**环形搜索**，半径内逐环展开）。
         /// <para>搜索顺序即契约：<c>r = 0..radius</c>，每环 <c>dx = -r..r</c> 外层、<c>dy = -r..r</c> 内层，
         /// 只取"在环上"（<c>|dx| == r || |dy| == r</c>）的格 ⇒ 同输入恒得同一格。</para>
         /// </summary>

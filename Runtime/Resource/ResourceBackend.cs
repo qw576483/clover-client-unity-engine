@@ -9,7 +9,7 @@ namespace CloverEngine
     /// <para>
     /// 存在理由：资源管理器负责的是**缓存 / 引用计数 / 水位淘汰 / 热更编排**，
     /// 而「从 Resources 读」还是「从 AssetBundle 读」是另一维度的变化。
-    /// 两者混在一个类里时（改造前就是这样），要加一种后端就得动缓存的代码 —— 那是最不该被牵连的部分。
+    /// 两者混在一个类里时，要加一种后端就得动缓存的代码 —— 那是最不该被牵连的部分。
     /// </para>
     /// <para>
     /// 约束：<b>调用与回调都必须发生在主线程</b>。Unity 的资源 API 不线程安全；
@@ -192,7 +192,7 @@ namespace CloverEngine
     /// <summary>
     /// Unity 内置 <c>Resources</c> 后端：引擎默认后端，零配置、零外部产物。
     /// <para>
-    /// 保留它的意义不只是兼容：它是**首包兜底** —— 即使 AssetBundle 后端因为清单缺失、
+    /// 它是**首包兜底** —— 即使 AssetBundle 后端因为清单缺失、
     /// 下载目录损坏而不可用，Resources 仍能让工程跑起来（开发期尤其重要）。
     /// </para>
     /// </summary>
@@ -221,7 +221,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 业务加载路径 → Unity <c>Resources</c> 全路径（拼上根前缀）。
-        /// 拼法与改造前 <see cref="BeginLoad"/> 里那一行**逐字一致**（含空路径的情形）⇒ 行为零变化；
+        /// 拼法与 <see cref="BeginLoad"/> 里那一行一致（含空路径的情形）；
         /// 两个同步入口与它共用，避免两处拼法漂移。
         /// </summary>
         private string Full(string path)
@@ -243,7 +243,7 @@ namespace CloverEngine
                 return null;
             }
 
-            // ★ 实测修复：若该资源在本帧已经被同步 Resources.Load 取过，
+            // ★ 若该资源在本帧已经被同步 Resources.Load 取过，
             //   Resources.LoadAsync 会「立刻完成」，此时 completed 事件**不会再触发**
             //   ⇒ 上游 ResourceManager 的 pending 会永远卡在 _inflight，该路径此后一直加载不出来
             //   （表现为：一次进图先取了占位/同步资源，之后异步加载再也不回调 —— 画面永远是占位色块）。
@@ -282,7 +282,6 @@ namespace CloverEngine
         /// <remarks>
         /// <b>降级说明（本后端没有索引）</b>：Unity 的 <c>Resources</c> **没有**「只问不取」的 API，
         /// 因此这里只能**探测**：<c>Resources.Load</c> 一次主资源 + <c>Resources.LoadAll</c> 一次子资源。
-        /// 代价与旧写法相同（业务侧以前就是 <c>Resources.Load&lt;Sprite&gt;(path) != null</c> 这么问的），
         /// 且上层（<c>ResourceManager.Exists</c>）**按路径缓存**结果 ⇒ 同一路径一辈子只探这一次。
         /// <para>
         /// 为什么必须补 <c>LoadAll</c> 这一半：条带 / 图集的**子 sprite 按路径取不到**

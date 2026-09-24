@@ -792,7 +792,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 把任务放回队尾重试，**带指数退避**（0.5s 起、上限 8s）：服务端持续 5xx 或弱网时，
-        /// 原实现会在数帧内连打 MaxRetries 次、放大服务端压力且进度抖动。超过上限则整体失败。
+        /// 避免在数帧内连打 MaxRetries 次（放大服务端压力且进度抖动）。超过上限则整体失败。
         /// </summary>
         private void Requeue(DownloadTask task)
         {

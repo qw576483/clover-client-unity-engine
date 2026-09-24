@@ -78,11 +78,11 @@ NEEDED: libdl.so, libm.so, libc.so           ← 不得出现 libssl/libcrypto�
 dyn-syms: MsQuicOpenVersion, MsQuicClose     ← 只应有这两个导出（C# 只 P/Invoke 这两个）
 ```
 
-### 为什么这么绕（Windows 宿主踩过的 7 个坑，已全部固化进脚本/补丁）
+### 为什么这么绕（Windows 宿主的 7 处平台差异，全部由脚本/补丁处理）
 
 msquic 上游**本身就支持 Android**（`submodules/CMakeLists.txt` 会按 `ANDROID_ABI` 把仓库内的
 quictls 子模块交叉编译成静态库），但它假设宿主是 Linux/macOS。Windows 上必须逐条绕过下面这些坑
-—— 每条都曾让构建停在看似无关的报错上：
+—— 不处理就会让构建停在看似无关的报错上：
 
 1. **必须用 Git-Bash(msys) 当宿主**：quictls 的 `Configure` 用 `which("clang")` 与
    `$ANDROID_NDK_ROOT` 做正斜杠前缀匹配来识别 NDK，原生 Windows perl 拿到的是反斜杠 → 直接 die；
@@ -129,7 +129,7 @@ cmake --build build-ios --config Release --target msquic
 Xcode 链接期从 `libmsquic.a` 解析符号。
 
 > 注：msquic 的 Android/iOS 支持**未经官方自动化验证**（microsoft/msquic#4041），出问题需要自己扛 ——
-> 本轮 Android 就是这样踩出来的，上面的清单就是它的"病历"。
+> 上面的清单 = 这条 Android 构建链上实际会遇到的平台差异，照它做可少走弯路。
 
 ## 产物入库策略
 

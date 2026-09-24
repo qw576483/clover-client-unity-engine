@@ -77,14 +77,14 @@ namespace CloverEngine
         /// 不变量：字段的 <see cref="FieldDef.Index"/> 必须 == 它在 <see cref="_fields"/> 中的位置 ——
         /// <see cref="ObjectBag"/> / <see cref="ObjectRecord"/> 都按 Index 直接索引定长数组。
         /// index 小于当前字段数 = 位置已被占用；index 大于当前字段数 = 中间留空洞
-        /// （旧实现只拦前者，后者保留大 Index 会让之后按索引取值全部数组越界）—— 两种都修正为追加。
+        /// （留下大 Index 会让之后按索引取值全部数组越界）—— 两种都修正为追加。
         /// </para>
         /// </summary>
         public ObjectSchema Add(string name, FieldType type, int index = -1)
         {
             if (_nameToIndex.ContainsKey(name))
             {
-                // 重名字段：旧实现直接覆盖 _nameToIndex —— FieldCount 虚增、旧字段"不可达"，
+                // 重名字段：直接覆盖 _nameToIndex 会让 FieldCount 虚增、旧字段"不可达"，
                 // 按名取值与按索引取值结果不一致。同名必然是 schema 定义写错，拒绝并告警。
                 Game.Logger?.Warn("ObjectSchema",
                     $"Add field '{name}' rejected: duplicate name (field #{_nameToIndex[name]} already uses it)");
@@ -150,8 +150,8 @@ namespace CloverEngine
     ///   - 行级增删改 + 按列名/索引读写
     ///
     /// <para>
-    /// 【未接线】引擎内部（Runtime/Editor/Tests/Samples~/Tools~）当前无消费点，属**公开契约**
-    /// （业务侧数据容器，<see cref="ObjectSchema"/> 的消费类型之一）—— 尚未接线，业务可直接使用，
+    /// 【调用面】引擎内部（Runtime/Editor/Tests/Samples~/Tools~）当前无消费点，属**公开契约**
+    /// （业务侧数据容器，<see cref="ObjectSchema"/> 的消费类型之一）—— 业务可直接使用，
     /// 不要按"无人使用"删除。
     /// </para>
     ///
@@ -199,8 +199,7 @@ namespace CloverEngine
         /// <summary>
         /// 按行号 + 列序号写入值（同时创建行，如果行不存在）。
         /// <para>
-        /// 与 <see cref="GetCell"/> 的防护对称：负行号、越界列一律**告警后忽略**（旧实现直接越界抛
-        /// IndexOutOfRange / ArgumentOutOfRange）。
+        /// 与 <see cref="GetCell"/> 的防护对称：负行号、越界列一律**告警后忽略**（不抛越界异常）。
         /// </para>
         /// </summary>
         public void SetCell(int row, int col, object value)
@@ -230,8 +229,7 @@ namespace CloverEngine
             var r = _rows[row];
             if (r.Length < _schema.FieldCount)
             {
-                // schema 在行创建之后新增了字段：补齐行长，否则按新字段索引写入会数组越界
-                // （旧实现只在 SetCell 里直接 _rows[row][col] = value，schema 一增就抛）。
+                // schema 在行创建之后新增了字段：补齐行长，否则按新字段索引写入会数组越界。
                 Array.Resize(ref r, _schema.FieldCount);
                 _rows[row] = r;
             }
@@ -291,7 +289,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 类型安全读取：int。单元格**未赋值（null）**时返回 fallback
-        /// （旧实现直接 Convert.ToInt32(null) 恒得 0，fallback 参数对空单元格完全失效）。
+        /// （⛔ 不可直接 <c>Convert.ToInt32(null)</c>：恒得 0，fallback 参数对空单元格完全失效）。
         /// </summary>
         public int GetInt(int row, int col, int fallback = 0)
         {
@@ -344,12 +342,12 @@ namespace CloverEngine
     /// 与服务端 object.Bag 对应：一个「属性袋」包含多个命名字段，每个字段有一个值。
     ///
     /// 用途：
-    ///   - 实体属性的强类型容器（替代已删除的 EntityInfo.Attrs 字典）
+    ///   - 实体属性的强类型容器
     ///   - 与服务端 Bag compact JSON 格式双向解析
     ///
     /// <para>
-    /// 【未接线】引擎内部（Runtime/Editor/Tests/Samples~/Tools~）当前无消费点，属**公开契约**
-    /// （业务侧属性袋，<see cref="ObjectInstance.Bag"/> 即本类型）—— 尚未接线，业务可直接使用，
+    /// 【调用面】引擎内部（Runtime/Editor/Tests/Samples~/Tools~）当前无消费点，属**公开契约**
+    /// （业务侧属性袋，<see cref="ObjectInstance.Bag"/> 即本类型）—— 业务可直接使用，
     /// 不要按"无人使用"删除。
     /// </para>
     ///
@@ -374,8 +372,8 @@ namespace CloverEngine
         /// <summary>
         /// 保证 <see cref="_values"/> 能容纳当前 Schema 的全部字段（只增不减）。
         /// <para>
-        /// 旧实现长度在构造时定型：schema 事后新增字段后，<c>Set/Get(name)</c> 用新索引读写直接抛
-        /// IndexOutOfRangeException —— 改为动态扩容。
+        /// schema 事后新增字段后，<c>Set/Get(name)</c> 用新索引读写必须能落进 <see cref="_values"/>
+        /// （长度在构造时定型则会抛 IndexOutOfRangeException）—— 故动态扩容。
         /// </para>
         /// </summary>
         private void EnsureCapacity()
@@ -452,7 +450,7 @@ namespace CloverEngine
         // ---- 类型安全读取 ----
 
         /// <summary>类型安全读取 int。未赋值（null）时返回 fallback
-        /// （旧实现 Convert.ToInt32(null) 恒得 0，fallback 失效）。</summary>
+        /// （⛔ 不可用 <c>Convert.ToInt32(null)</c>：恒得 0，fallback 失效）。</summary>
         public int GetInt(string name, int fallback = 0)
         {
             var v = Get(name);
@@ -515,7 +513,7 @@ namespace CloverEngine
             var dict = new Dictionary<string, object>();
             foreach (var field in _schema.Fields)
             {
-                // schema 增长但尚未触发扩容时，新增字段按"未赋值"处理（旧实现直接索引越界）
+                // schema 增长但尚未触发扩容时，新增字段按"未赋值"处理（直接索引会越界）
                 var val = field.Index < _values.Length ? _values[field.Index] : null;
                 if (val != null)
                     dict[field.Name] = val;
@@ -544,8 +542,8 @@ namespace CloverEngine
     /// </code>
     ///
     /// <para>
-    /// 【未接线】引擎内部（Runtime/Editor/Tests/Samples~/Tools~）当前无消费点，属**公开契约**
-    /// （业务侧数据对象）—— 尚未接线，业务可直接使用，不要按"无人使用"删除。
+    /// 【调用面】引擎内部（Runtime/Editor/Tests/Samples~/Tools~）当前无消费点，属**公开契约**
+    /// （业务侧数据对象）—— 业务可直接使用，不要按"无人使用"删除。
     /// </para>
     /// </summary>
     public class ObjectInstance

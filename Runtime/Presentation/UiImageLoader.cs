@@ -3,29 +3,25 @@
 // UI 图**异步装载器**（请求序号守卫 + 占位保留 + 同路径去重 + 色调回填）
 // ＋ **2D 光照 unlit 校验 / 还原**（纯函数判 shader 名 + 还原 Canvas 默认材质）。
 //
-// 出处：clover-project-diablo2 `client/Assets/Scripts/UI/UiArt.cs`
-//   · `SetSprite` / `SetArtTint`（该文件 `:150-182` 的 `ArtState`、`:298-337` 的加载体）——
-//     逐条照搬的语义：**每次请求自增序号、回调里只认"我这次是不是最新的"**（`state.Request != request`
+// 语义：
+//   · **每次请求自增序号、回调里只认"我这次是不是最新的"**（`state.Request != request`
 //     ⇒ 丢弃）；加载**失败**保留调用方设的**占位底色**并 Warn（不静默变黑/变透明）；**同路径不重复请求**；
 //     色调记在 Image 侧、由"贴图到位的那一刻"统一套用（这样"先设色后回图"与"先回图后设色"两种顺序都对）。
-//   · `IsLitShader` / `EnsureUnlit`（该文件 `:914-941`）—— 判 shader 名（**纯函数**）+ 把被挂了
+//   · `IsLitShader` / `EnsureUnlit`：判 shader 名（**纯函数**）+ 把被挂了
 //     受光材质的 Image 换回 Canvas 默认 UI 材质。
 //
-// 为什么下沉（每个用 uGUI + 异步贴图的项目都会重踩一次）：
+// 为什么需要这一层守卫（uGUI + 异步贴图的通用失效面）：
 //   ① `Game.Res.LoadAsset` 是**异步**的（只有命中引擎缓存才同帧回调）⇒ 对**同一个 Image** 连续发起
 //      A、B 两次请求时，**A 的回调可能晚于 B 到达**，画面于是停在 A（旧图）—— 表现成"点了没反应 /
-//      快速悬停或逐帧换图时画面来回跳"，且**零报错零日志**；单靠调用方自觉写不出守卫（两处业务各自
-//      重踩过：三态半身像靠"进屏预热"绕开、转身过渡逐帧撞上）。
+//      快速悬停或逐帧换图时画面来回跳"，且**零报错零日志**；单靠调用方自觉写不出守卫。
 //   ② 项目接了 2D 光照（URP 2D / 自定义 `*Lit*` shader）后，UI 图会被光照当场景精灵压暗，而
 //      **不报任何错**（只有看图才发现）⇒ 只能靠一次 shader 名判定的防御性校验兜住。
 //
-// 用法 + 首个消费方：
+// 用法：
 //   ① 贴图：`img.color = 占位底色;`（调用方自己给，本件在失败时**原样保留**）
 //            `UiImageLoader.SetSprite(img, "UI/Icon/Knight");`  ← 路径由调用方给，引擎不认任何素材名
 //            `UiImageLoader.SetTint(img, Color.gray);`          ← 贴图未到时先记下，到位那一刻统一套用
 //   ② unlit：`UiImageLoader.EnsureUnlit(img);`（建件/换材质之后调一次即可；纯判据 `IsLitShader` 可离线断言）
-//   首个消费方：clover-project-diablo2 `client/Assets/Scripts/UI/UiArt.cs`（`SetSprite` / `EnsureUnlit`
-//   转发到本件）—— **接线由项目侧收尾片统一做，本件不碰任何项目文件**。
 //
 // 边界（⛔ 别当万能药用）：
 //   · 引擎**不知道**任何项目的资源路径 / 占位配色 / 字号 / 图集划分 ⇒ 路径与占位色一律由调用方给；
@@ -98,7 +94,6 @@ namespace CloverEngine
         /// <para>
         /// <b>★ 请求守卫（本方法存在的首要理由）</b>：每次调用自增本 Image 的请求序号，回调里比对
         /// 「我这次是不是最新的」，**过期的直接丢弃**（连 Warn 都不打 —— 那是设计内行为）。
-        /// 根因见文件头「为什么下沉 ①」。
         /// </para>
         /// <para>
         /// <b>失败保留占位</b>：回调拿到 <c>null</c> ⇒ 只打一条**限频** Warn（点名路径 + 当前底色），
@@ -111,7 +106,7 @@ namespace CloverEngine
         /// </para>
         /// <para>
         /// <b>语义</b>：同一个 Image 上「**后发起的请求胜出**」。所有调用点都是"贴当前该显示的那张图"，
-        /// 与"回调恰好按序到达"时的行为逐字相同；只在乱序时把错态修成最新态。
+        /// 与"回调恰好按序到达"时的行为一致；只在乱序时把错态修成最新态。
         /// </para>
         /// </summary>
         /// <param name="img">目标 Image（为 <c>null</c> 或已销毁 ⇒ 直接返回）。</param>
@@ -233,7 +228,7 @@ namespace CloverEngine
             if (mat == null) return;                          // 最常见路径：Canvas 默认材质（unlit），无需处理
             if (!IsLitShader(mat)) return;
 
-            // 非预期分支（受光材质会静默压暗 UI）：换回 UI 默认材质 + 留痕。限频：一次事故里往往整屏都是。
+            // 非预期分支（受光材质会静默压暗 UI）：换回 UI 默认材质 + 留痕。限频：触发时往往整屏都是。
             LogThrottle.WarnThrottled(Tag, "material.lit",
                 $"{graphic.GetType().Name} {graphic.name} 的材质 {mat.shader?.name} 受 2D 光照影响（会压暗 UI）" +
                 " ⇒ 已改回 Canvas 默认 UI 材质（unlit）", 5f);

@@ -21,8 +21,7 @@ namespace CloverEngine
         /// <summary>当前连接状态。</summary>
         ConnectionState State { get; }
 
-        // 「对端地址」不再是契约成员：展示一律走 NetworkManager 的 ActiveLine / LinePlan / ServerAddr
-        // （旧版 ITransportConnection.GetAddr() 除各实现自身与 SimulatedTransport 的转发外无消费点，已删除）。
+        // 「对端地址」不是契约成员：展示一律走 NetworkManager 的 ActiveLine / LinePlan / ServerAddr。
 
         /// <summary>连接建立成功回调（可能在后台线程触发）。</summary>
         event Action Connected;
@@ -130,7 +129,7 @@ namespace CloverEngine
         /// **不能**读 <c>MsQuicRuntime.IsAvailable</c> —— 后者是"探测结果缓存"，**未探测时恒为 false**。
         /// </para>
         /// <para>
-        /// 踩过的真事故（IL2CPP 真机包）：编辑器里因为测试/探针先探测过，QUIC"看起来能走"；
+        /// ⚠️ 不主动探测就会误判：编辑器里测试/探针可能先探测过，QUIC"看起来能走"；
         /// 而 **真 Player / 移动端是全新进程、没有人探测过 ⇒ 能力判定恒 false ⇒ QUIC 被静默排除**，
         /// 线路规划里只剩 TCP（包内日志 `line plan: tcp:127.0.0.1:8002`，且全包**没有一条** QUIC 日志）。
         /// </para>
@@ -210,11 +209,9 @@ namespace CloverEngine
             var web = Application.platform == RuntimePlatform.WebGLPlayer;
             if (web)
             {
-                // Web 家族当前**没有任何可用线路**：WebTransport 在客户端从未实现（其死枚举值已删）；
+                // Web 家族当前**没有任何可用线路**：WebTransport 在客户端从未实现；
                 // WebSocket 需要浏览器侧 jslib 桥接（WebSocketConnection.ConnectAsync 在 WebGL 会直接抛
-                // NotSupportedException）。
-                // 旧实现放行 WebSocket = 假可用（声明可用、连接必失败，失败还被掩盖到连接期）；
-                // 现在如实判 false，由线路规划把 WS 裁掉并写明原因（可见，不静默）。
+                // NotSupportedException）⇒ 如实判 false，由线路规划把 WS 裁掉并写明原因（可见，不静默）。
                 // jslib 桥接落地后，从这里放行对应线路。
                 return false;
             }
@@ -383,8 +380,8 @@ namespace CloverEngine
                     // 裸 UDP 是**次级不可靠通道**，不是可靠线路：它由 NetworkManager 在 UdpAddr 就绪时
                     // 单独建立（见 Runtime/Network/NetworkManager.cs 的 UDP 绑定路径），不经本工厂。
                     // 但 TransportCapabilities.IsSupported(RawUdp) 为 true，因此一条含 RawUdp 的自定义
-                    // 可靠序列会被 ApplyPlatformRules 原样保留、落到这里的 default —— 旧行为只报一句
-                    // 笼统的 "transport kind not implemented"，排查时看不出该怎么改。这里给出可执行提示。
+                    // 可靠序列会被 ApplyPlatformRules 原样保留、落到这里的 default —— 本条异常给的是
+                    // 可执行改法（笼统的 "transport kind not implemented" 排查时看不出该怎么改）。
                     throw new NotSupportedException(
                         "RawUdp 不是可靠线路，不能出现在可靠线路序列里；" +
                         "启用不可靠上行请配置 TransportOptions.UdpAddr（服务端经 EMsg.UDPBindGrant 下发令牌后自动绑定）");

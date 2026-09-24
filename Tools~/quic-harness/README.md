@@ -14,8 +14,6 @@
 （`Game.Logger` / `TransportKind` / 契约接口 / `MonoPInvokeCallback` 空特性）。
 
 ⇒ 这里跑过的代码**就是 Unity 里跑的那份**，不存在"两份代码漂移"
-（历史教训：旧版在 `Stubs.cs` 里**复制**了一份 `ClientFrame`，还漏了帧体上限校验 ——
-帧头布局一改，试验台仍按旧格式跑通，实测已铲除、改为链接真实源码）。
 （副作用：这几个文件因此被约束成"不依赖 UnityEngine"，对绑定本身也是好事。）
 
 ## 怎么跑
@@ -43,7 +41,7 @@ bin/Debug/net8.0/quic-harness.exe login  # 只跑"连接 → 请求/回包 → �
 
 环境变量：`CLOVER_QUIC_TRACE=1` 打开**逐调用跟踪**（默认关，正常跑不刷屏）。
 
-## 它抓到过的真 bug（保留作为方法论样本）
+## 一个原生崩溃样本（方法论示例）
 
 **现象**：Unity 编辑器被**原生断言**打死 3 次 —— Windows 事件日志
 `Faulting module: msquic.dll, version 2.4.16.0`，异常码 **`0xC0000420`**（STATUS_ASSERTION_FAILURE）。
@@ -56,18 +54,18 @@ bin/Debug/net8.0/quic-harness.exe login  # 只跑"连接 → 请求/回包 → �
 3. 打印 `totalLen/copied/buffers` ⇒ **数值本身完全正确**（79=79）⇒ 不是算错；
 4. 才转向"**这个 API 本就不该在这里调**"：
 
-**根因**：`StreamReceiveComplete` **只用于"挂起（PEND）式"收包**。
+**口径依据**：`StreamReceiveComplete` **只用于"挂起（PEND）式"收包**。
 我们在回调里把数据同步拷进托管内存、返回 `SUCCESS`，就等于"已消费完毕" ——
 **再调一次会把 msquic 的收包记账写坏**，代价不是立刻报错，而是**之后关闭连接时原生断言崩溃**。
 
-**修法**：同步消费就**不要再调** `StreamReceiveComplete`（`QuicConnection.cs` 的 `StreamEvent.Receive` 分支有长注释）。
-修完：`plain/send/login/dgram/multi/all` **全部退出码 0**，压力步骤全过。
+**正确做法**：同步消费就**不要再调** `StreamReceiveComplete`（`QuicConnection.cs` 的 `StreamEvent.Receive` 分支有长注释）。
+该口径下的实测结果：`plain/send/login/dgram/multi/all` **全部退出码 0**，压力步骤全过。
 
-## 两条方法论（踩过才写的）
+## 两条方法论（来自实测）
 
 1. **进程级崩溃时，stdout 缓冲会整体丢失** —— 你看到的"最后一条日志"可能是假象。
    ⇒ 试验台的日志**每条都 `Flush()`**（`Stubs.cs` 的 `ConsoleHarnessLogger`）。
-   （第一次就是这么被骗的：以为崩在 `ConnectionShutdown` 之后，实际崩点更靠后。）
+   （只按"最后一条日志"判会误判崩点：真实崩点可能在它之后更远处。）
 2. **每一步先打标记，再动手** —— 崩溃本身没有堆栈，**最后打印出来的标记 = 崩在下一步**。
 
 ## 与 Unity 侧测试的分工
@@ -75,7 +73,7 @@ bin/Debug/net8.0/quic-harness.exe login  # 只跑"连接 → 请求/回包 → �
 | | 试验台（本目录） | `Tests/PlayMode/QuicLoopbackTests.cs` |
 |---|---|---|
 | 速度 | 秒级 | 分钟级（要起编辑器） |
-| 能查什么 | 原生绑定/生命周期/崩溃 | 引擎接线（`CloverNet`/`NetworkManager` 真的走 QUIC） |
+| 能查什么 | 原生绑定/生命周期/崩溃 | 引擎侧使用链（`CloverNet`/`NetworkManager` 真的走 QUIC） |
 | 默认跑吗 | 手动跑 | **`CLOVER_QUIC_E2E=1` 才跑**（会真连网关，默认跳过避免误报） |
 
 两者都在 `Runtime/Plugins/x86_64/msquic.dll` 上跑，**崩溃排查一律先用试验台**，确认干净了再进 Unity 复跑。

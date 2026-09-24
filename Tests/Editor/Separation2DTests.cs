@@ -11,8 +11,8 @@ namespace CloverEngine.Tests
     /// 缓冲不足 / 迭代不收敛）都要有**明确且不抛**的行为，且"同输入 ⇒ 逐位同输出"（确定性）要断言。
     /// </para>
     /// <para>
-    /// 用例里的 <see cref="Radius"/> 只是**测试取样值**（0.36 = cs16 侧 <c>CsConst.PlayerRadius</c> 的同口径
-    /// 数量级），⛔ 不是引擎常量 —— 引擎不规定角色半径。
+    /// 用例里的 <see cref="Radius"/> 只是**测试取样值**（0.36 = 角色半径的数量级取样），
+    /// ⛔ 不是引擎常量 —— 引擎不规定角色半径。
     /// </para>
     /// </summary>
     public class Separation2DTests

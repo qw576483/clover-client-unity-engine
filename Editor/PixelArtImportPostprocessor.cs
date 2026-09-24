@@ -3,14 +3,7 @@
 // 像素素材导入后处理器：按配置资产（Editor/PixelArtImportSettings.cs）给纹理配好
 // PPU / FilterMode.Point / 不压缩 / 无 mipmap / alphaIsTransparency / 轴心。
 //
-// 出处：clover-project-super-mario `client/Assets/Editor/SpriteImportPostprocessor.cs:20-64`。
-//   ⛔ 与出处**刻意不同**的两点（下沉的必要条件）：
-//   ① **没有写死的目录**：出处用 `path.Contains("/Resources/Sprites/")` 当作用域，
-//      下沉后作用域 = 配置资产的规则表（`/Resources/Sprites/`、`Mario/Enemies/Items` 全去掉）；
-//   ② **默认不生效**：出处"文件存在即生效"；这里要同时满足 ① 总开关打开（EditorPrefs，默认关）
-//      ② 已选中配置资产 ③ 该纹理命中某条规则 —— 三者缺一就不碰。理由见类型注释。
-//
-// ★ 必须保留的坑（出处 42-62 行的注释，实测踩过）：
+// ★ 注意：
 //   `spriteAlignment` / `spritePivot` **不在** TextureImporter 上，而在 TextureImporterSettings 里
 //   —— 直接写 `importer.spriteAlignment` **编译不过**（不是"不生效"，是编译错误）。
 //   正确写法是 ReadTextureSettings → 改 → SetTextureSettings 这套**往返读写**。

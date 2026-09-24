@@ -102,7 +102,7 @@ namespace CloverEngine
             }
             catch (Exception ex)
             {
-                // Bind 失败时释放刚创建的 socket：否则句柄要等 GC 才回收（旧实现直接 return null）
+                // Bind 失败时释放刚创建的 socket：否则句柄要等 GC 才回收
                 try
                 {
                     socket?.Close();

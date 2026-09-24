@@ -126,7 +126,7 @@ namespace CloverEngine
                         return;
                     }
 
-                    // body 声明成功仍要判传输层结果（原实现从不检查 resp.IsSuccess / HTTP 2xx）：
+                    // body 声明成功仍要判传输层结果：
                     // "body 成功 + HTTP 层失败"属异常不一致，以 HTTP 层为准。
                     if (!resp.IsSuccess)
                     {
@@ -146,7 +146,7 @@ namespace CloverEngine
                 }
 
                 // body 为空 / 不可解析：按传输层结果归因。StatusCode=0 是连接失败或超时，
-                // 不是"响应无法解析"；该分支原先既误报归因又不留日志，两条一并修掉。
+                // 不是"响应无法解析"。
                 if (!resp.IsSuccess)
                 {
                     Game.Logger?.Warn("Auth",

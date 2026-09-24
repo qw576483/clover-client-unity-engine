@@ -1,28 +1,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Presentation/UIWidgetControls.cs
 // uGUI 通用控件工厂：布局助手 + Slider / InputField / Selector / ToggleRow（＋两个句柄类型）——
-// 通用横切能力，下沉到引擎。与 `UIWidgets.cs` 的 UIFactory 是同**一个** static partial class。
+// 通用横切能力。与 `UIWidgets.cs` 的 UIFactory 是同**一个** static partial class。
 //
-// 出处：clover-project-cs16 的
-//   · `client/Assets/Scripts/UI/Flow/CsUiStyle.cs` —— 布局助手 `AnchoredTopLeft` / `AnchoredBottom` /
-//     `CreateBottomLabel` / `CreateFullScreen` / `CreateBoxRect` / `CreateLabel` / `SetBarWidth`，
-//     控件工厂 `CreateSelector` / `CreateSlider` / `CreateInputField` / `CreateToggleRow`，
-//     以及 `Selector` / `ToggleRow` 两个句柄类型；
-//   · `client/Assets/Scripts/UI/InGame/CsHudTheme.cs`（:405-545）—— 同一批控件在项目里被**第二遍**
-//     自建（`CreateBar` / `CreateInputField`），本片一并收敛到这里。
-//   pos / size / fontSize / 锚点 / 轴心 / 层级顺序**逐字照搬**，语义与视觉结果不变。
-//
-// ⛔ **没有下沉**（那也是能力域划分要求，不是遗漏）：
-//   · **配色**：CsUiStyle 的 `#1B1B1B` / `#E8A33D`、CsHudTheme 的 `#FFB000` / `#9CFF9C` … 都是每个
-//     项目的主题色，引擎只接受 `Color` / `ColorBlock` / `*Style` 参数，**不给任何默认值**。
+// ⛔ **下列不在本件**（能力域划分要求，不是遗漏）：
+//   · **配色**：主题色由调用方给，引擎只接受 `Color` / `ColorBlock` / `*Style` 参数，**不给任何默认值**。
 //   · **文案**：`"◀"` / `"▶"` 箭头、值占位字、placeholder、按钮标题全部由调用方传入。
-//   · **字号档位**：CS 菜单的 22 / 24、HUD 输入框的 20 / 18 都是业务取值，一律经参数传入。
-//   · 面板特有的封装（CsUiStyle 的悬停橙按钮 `CreateButton`、CsHudTheme 的 `Place*` 定位族与
-//     `CsHudBar` 句柄、`UIFactory.Stretch` 已有的铺满）—— 留在项目侧，做**薄转发**。
+//   · **字号档位**：具体档位是业务取值，一律经参数传入。
+//   · 面板特有的封装（悬停橙按钮、`Place*` 定位族与句柄类型、`UIFactory.Stretch` 已有的铺满）
+//     —— 留在调用方侧。
 //
-// 为什么下沉：`结构规则.md` §4.4「已有同类能力不准再起第二套」。同一个 uGUI 控件在项目里被造了
-//   三遍（CsUiStyle / CsHudTheme / ConsolePanel 各一份），且三份**互相指对方"有坑/编译不过"**。
-//   收敛到引擎后新项目不必再踩一遍下面这三个实测坑：
+// 复用规则：`结构规则.md` §4.4「已有同类能力不准再起第二套」。下面三条是**必须遵守的写法**
+//   （都是"看得见现象、查不到原因"的类型）：
 //     ① **Slider 不能用 `DefaultControls.CreateSlider`**：它的配色塞在内部私有层级里，只能靠名字找
 //        节点，而 Unity 明确说过不要依赖该层级；正确做法是手搭轨道 + 填充分 + 手柄分，只依赖
 //        `Slider.fillRect` / `Slider.handleRect` 两个**公开**属性（见 CreateSlider）。
@@ -34,11 +23,11 @@
 //        要用**锚点宽度**表达比例（见 SetBarWidth，与 `WorldHpBar` 的世界空间版是同类陷阱的另一种形态）。
 //
 // 语义约束（改一条 = 语义漂移）：
-//   ① 布局字面量（`new Vector2(...)` / 字号位次）逐字照搬项目现版，本文件不做任何"顺手优化"。
+//   ① 布局字面量（`new Vector2(...)` / 字号位次）是本件的固定口径，不做任何"顺手优化"。
 //   ② 引擎**不含**任何项目配色 / 文案 / 字号取值：全部来自参数或 `*Style`。
 //   ③ `CreateSelector` 的箭头与 `CreateToggleRow` 的值按钮 = **非强调**按钮：先按引擎
 //      `CreateButton` 建（其 label 默认 26 号、色 `(0.95,0.96,1)`），再按 `*Style` **覆盖**字号与颜色
-//      —— 与项目现版"先建后改"两次赋值的**最终结果**逐字一致（顺序也必须一致，否则会被覆盖回去）。
+//      —— 与"先建后改"两次赋值的**最终结果**一致（顺序也必须一致，否则会被覆盖回去）。
 // ─────────────────────────────────────────────────────────────────────────────
 using System;
 using System.Collections.Generic;
@@ -155,8 +144,8 @@ namespace CloverEngine
         //
         // 引擎已有 `Stretch`（铺满父节点）与 `CreateCentered`（居中定尺）；这里补的是通用的
         // `Place`（锚点 + 轴心 + 偏移），以及基于它派生的"左上角 / 底部为原点"定位族与三个便捷建件。
-        // 项目 `CsUiStyle.StretchRoot` 与 `CreateFullScreen` 分别等价于引擎既有的 `Stretch` 与
-        // `CreatePanel` ⇒ 那两处**不在这里再起第二套**，项目侧直接转发引擎既有的方法。
+        // 调用方的铺满 / 全屏建件分别等价于引擎既有的 `Stretch` 与
+        // `CreatePanel` ⇒ 那两处**不在这里再起第二套**，调用方直接转发引擎既有的方法。
 
         /// <summary>
         /// 定位的最通用形式：把矩形钉在父节点的某个锚点 / 轴心（<paramref name="pos"/> 为相对该锚点的偏移）。
@@ -312,9 +301,7 @@ namespace CloverEngine
         /// <para>⛔ <b>本方法存在的直接原因</b>：uGUI 里 <c>InputField.placeholder</c> 的
         /// 声明类型是 <c>Graphic</c>（包源码 <c>.../Runtime/UGUI/UI/Core/InputField.cs</c> 的
         /// <c>public Graphic placeholder</c>），对它直接取 <c>.font</c> / <c>.fontSize</c> / <c>.text</c>
-        /// 会报 <b>CS1061</b>。唯一正确写法是先 <c>as Text</c> 再取（下面的 placeholder 段）。
-        /// 项目侧曾把这记成「CsUiStyle.CreateInputField 编译不过」（CsHudTheme.cs:473 / ConsolePanel.cs:80）
-        /// —— 根因就是这一行缺失；本方法已按正确写法下沉，该缺陷不复存在。</para>
+        /// 会报 <b>CS1061</b>。唯一正确写法是先 <c>as Text</c> 再取（下面的 placeholder 段）。</para>
         /// </summary>
         public static InputField CreateInputField(string name, Transform parent, Vector2 anchor, Vector2 pivot,
             Vector2 pos, Vector2 size, string placeholderText, int characterLimit, WidgetInputFieldStyle style)
@@ -324,7 +311,7 @@ namespace CloverEngine
             var rt = (RectTransform)go.transform;
             rt.SetParent(parent, false);
             // 定位用通用 Place（不是 AnchoredTopLeft）：菜单侧传 (0,1)/(0,1) 即"左上角为原点"，
-            // HUD 侧传自己的锚点对 —— 两条路径的四个字段赋值逐字相同，视觉不变。
+            // HUD 侧传自己的锚点对 —— 两条路径的四个字段赋值相同，视觉不变。
             Place(rt, anchor, pivot, pos, size);
 
             var input = go.GetComponent<InputField>();
@@ -430,12 +417,7 @@ namespace CloverEngine
 
         // ═══════════════════════ 竖向滚动列表 ═══════════════════════
         //
-        // 出处（形状与坑逐条来自参考实现，⛔ 不含任何项目专属数值）：
-        //   `clr-project-cr` 的 `UI/Panels/DeckEditPanel.cs` 的 `BuildGrid()` —— 它为了"可按住拖动的卡池"
-        //   自建了一套 `ScrollRect + RectMask2D + content + 行`；同一个交付单元此前只做过分页
-        //   （`RoomListPanel`）⇒ 同一个工程里出现了**两份取法**。本件把它收敛成引擎的一个建件。
-        //
-        // ★ 必须写进注释的四个坑（都是"看得见现象、查不到原因"的类型）：
+        // ★ 四处注意（都是"看得见现象、查不到原因"的类型）：
         //   ① **`viewport` / `content` 两个字段必须显式赋值**。`ScrollRect` 在二者任一为空时**直接 return**
         //      （不报错、不警告）⇒ 表现是"节点都在、拖不动"，最难归因的一种。
         //   ② **视口必须有可命中的图形**：`RectMask2D` **不是** `Graphic`，只有它时射线打不到视口本身 ——
@@ -449,7 +431,7 @@ namespace CloverEngine
         //
         // ⛔ 引擎不含任何项目的滚动手感数值（`movementType` / `elasticity` / `decelerationRate` /
         //    `scrollSensitivity` 一律不预设）：把 <see cref="VerticalList.Scroll"/> 暴露给调用方，
-        //    手感由项目定（参考实现自己登记了"这两个值与原版的真实手感参数无出处"）。
+        //    手感由项目定。
         // ⛔ 也不用 `Mask`：它要求同一个节点上有 `Graphic` 且行为受 `showMaskGraphic` 影响；
         //    `RectMask2D` 只需矩形即可裁剪，且不依赖 sprite。
 
@@ -475,12 +457,12 @@ namespace CloverEngine
         /// <param name="itemHeight">行高（画布单位）。</param>
         /// <param name="spacing">行间距（画布单位；可为 0）。</param>
         /// <param name="masked">是否挂 <see cref="RectMask2D"/> 裁掉出框的行。默认 true。</param>
-        /// <param name="viewportColor">视口底色；默认全透明（只为可命中，见上文坑 ②）。</param>
+        /// <param name="viewportColor">视口底色；默认全透明（只为可命中，见上文注意 ②）。</param>
         public static VerticalList CreateVerticalList(string name, Transform parent, Vector2 anchor, Vector2 pivot,
             Vector2 pos, Vector2 viewportSize, float itemHeight, float spacing, bool masked = true,
             Color viewportColor = default(Color))
         {
-            // 视口底色用 Image 而不是 CreateNode：见上文坑 ② —— 没有 Graphic 就没有可命中的图元。
+            // 视口底色用 Image 而不是 CreateNode：见上文注意 ② —— 没有 Graphic 就没有可命中的图元。
             var viewport = CreatePanel(name, parent, viewportColor, true);
             Place(viewport.rectTransform, anchor, pivot, pos, viewportSize);
 
@@ -488,7 +470,7 @@ namespace CloverEngine
             if (masked)
             {
                 // 遮罩挂在**视口自己**身上：`RectMask2D` 裁的是自己的子节点，而子节点只有 content
-                // ⇒ 效果 = 视口裁剪，不必再多套一层空节点（参考实现的做法）。
+                // ⇒ 效果 = 视口裁剪，不必再多套一层空节点。
                 viewport.gameObject.AddComponent<RectMask2D>();
             }
 
@@ -664,7 +646,7 @@ namespace CloverEngine
         /// <summary>
         /// 重新按"行高 + 间距"排布所有行，并把 content 高度写成总高。
         /// <para>
-        /// ⛔ 不写 content 高度的话：滚动范围会算错（拖不动 / 底部行被永久裁掉），见建件注释的坑 ③。
+        /// ⛔ 不写 content 高度的话：滚动范围会算错（拖不动 / 底部行被永久裁掉），见建件注释的注意 ③。
         /// </para>
         /// </summary>
         public void Reflow()

@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace CloverEngine
 {
-    // 契约（IAnimPlayer / IAnimationManager）已下沉到
+    // 契约（IAnimPlayer / IAnimationManager）见
     // Runtime/Core/PresentationContracts.cs（Game 门面在 Core）。
 
     internal class AnimationManager : IAnimationManager
@@ -55,7 +55,7 @@ namespace CloverEngine
                 if (player is AnimatorPlayer ap)
                 {
                     // 只在 Animator 被**真正销毁**时移除；仅"未激活"（SetActive(false) 暂藏）不能摘掉 ——
-                    // 原实现一摘就永不复位，重新激活后 OnComplete 永不触发。
+                    // 一摘就永不复位，重新激活后 OnComplete 永不触发。
                     if (ap.Animator == null)
                     {
                         _players.RemoveAt(i);
@@ -132,7 +132,7 @@ namespace CloverEngine
         public void OnComplete(Action callback)
         {
             if (callback == null) return;
-            // 多订阅者要**逐个通知**（原实现是覆盖式赋值：第二个订阅者会把第一个顶掉且无任何提示）；
+            // 多订阅者要**逐个通知**（覆盖式赋值会让第二个订阅者把第一个顶掉且无任何提示）；
             // 本接口没有"注销"，同一回调重复订阅按去重处理，避免列表无限累积。
             if (!_onCompleteHandlers.Contains(callback))
                 _onCompleteHandlers.Add(callback);

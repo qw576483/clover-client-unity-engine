@@ -48,10 +48,7 @@ namespace CloverEngine
         /// <para>
         /// 本类加密的是**整帧**（8B 帧头 + body），因此它同时是「启用通道加密后单帧的实际上限」：
         /// 与 <c>ClientFrame.MaxBodySize</c>（10 MiB，对应服务端闸门 <c>gateway.max_frame_size</c>）
-        /// **同一个量级**，差别只有密文的 nonce + tag 28B（明文侧再加 8B 帧头）——不再是旧实现里
-        /// 那个 1 MiB 的、与帧上限自相矛盾的**另一个口径**（那时业务按 10 MiB 组帧会在
-        /// <see cref="Encrypt"/> 里被拦下：密文能加密成功却永远解不开，且会被服务端
-        /// 按篡改断连 —— 现场表现为连接静默失效，而不是报错）。
+        /// **同一个量级**，差别只有密文的 nonce + tag 28B（明文侧再加 8B 帧头）。
         /// </para>
         /// </summary>
         public const int MaxPlaintextBytes = MaxCiphertextBytes - NonceSize - TagSize;
@@ -62,7 +59,7 @@ namespace CloverEngine
         /// <summary>AesGcm 复用实例的访问门（静态缓存，加解密统一在锁内执行）。</summary>
         private static readonly object GcmGate = new object();
 
-        /// <summary>复用中的 AesGcm 实例（热路径不再按包 new + 导入密钥）。</summary>
+        /// <summary>复用中的 AesGcm 实例（热路径不按包 new + 导入密钥）。</summary>
         private static AesGcm _gcm;
 
         /// <summary>_gcm 对应的密钥数组引用（引用相等判定"该重建了"）。</summary>
@@ -164,7 +161,7 @@ namespace CloverEngine
 
                 cipher = new byte[plaintext.Length];
                 tag = new byte[TagSize];
-                // 复用 AesGcm 实例（密钥不变时不重复构造 + 导入；原实现每包 new 一次）；加解密统一在锁内。
+                // 复用 AesGcm 实例（密钥不变时不重复构造 + 导入）；加解密统一在锁内。
                 lock (GcmGate)
                     GetGcmLocked(key).Encrypt(nonce, plaintext, cipher, tag);
 

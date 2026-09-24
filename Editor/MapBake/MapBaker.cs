@@ -103,8 +103,7 @@ namespace CloverEngine.Editor
 
         /// <summary>
         /// 交互式（编辑器帧驱动）导出：**面板与菜单走这条**。
-        /// 逐格烘焙被切成「每帧一块」并显示**可取消**的进度条 —— 这是
-        /// 「MaxDimension 放到 32768 时点一次烘焙把编辑器冻住数分钟、且毫无反馈」的修复点。
+        /// 逐格烘焙被切成「每帧一块」并显示**可取消**的进度条。
         /// 完成回调 (成功, 摘要)；取消回调 (false, "已取消…")。
         /// </summary>
         public static void ExportInteractive(MapBakeOptions o, Action<bool, string> onDone)
@@ -166,7 +165,7 @@ namespace CloverEngine.Editor
             /// <summary>场景里参与统计的碰撞体总数（含被排除的）。</summary>
             public int Seen;
 
-            /// <summary>按「地面阈值」排除的碰撞体数（沿用旧口径）。</summary>
+            /// <summary>按「地面阈值」排除的碰撞体数。</summary>
             public int SkippedAsGround;
 
             /// <summary>层过滤排除的碰撞体数（按 Unity Layer 排除）。</summary>
@@ -218,8 +217,6 @@ namespace CloverEngine.Editor
             }
 
             // ★ 必须按路径**显式打开**目标场景再导出。
-            // 踩过的坑：批处理里刚保存完场景可能触发域重载，此时 active scene 会变成一个空的无标题场景,
-            // 结果导出「0 障碍物 + 全可走」的空地图（日志里能自证：根对象=0）。
             if (!File.Exists(o.ScenePath))
             {
                 summary = $"场景不存在: {o.ScenePath}";
@@ -360,11 +357,7 @@ namespace CloverEngine.Editor
         /// 收集「高于地面阈值 + 通过层过滤」的碰撞体（排除地面本身），bounds 为世界 AABB。
         /// 各类排除计数写进 <paramref name="input"/>（用于日志与摘要，⛔ 不许静默）。
         /// <para>
-        /// ⚠️ <b>历史的绕法，以及为什么不该把它搬进引擎</b>：多层地图项目（cs16 的 de_dust2）为了绕开
-        /// "位图是单层 2D"这个限制，做法是「把真实几何（Visual MeshCollider）在烘焙前**临时整体关掉**
-        /// 并存盘，只留一层每格一个 BoxCollider 的"烘焙代理"，烘完再把碰撞体恢复」——
-        /// 这条链路要改场景、要存盘、中断就会在磁盘上留下"碰撞体全关"的场景，是**项目侧**的绕法。
-        /// 引擎该给的替代品是这里的**层过滤**：用不变量（Unity Layer / 高度带）描述"谁参与烘焙"，
+        /// <b>层过滤</b>：用不变量（Unity Layer / 高度带）描述"谁参与烘焙"，
         /// 不改场景、可复现、可审计。真·逐格高度场（一份数据带多层）列 V2
         /// （见 <see cref="CloverMapFormat.FlagHeightField"/>），V1 解码器见到该段仍**明确拒绝**。
         /// </para>
@@ -411,7 +404,7 @@ namespace CloverEngine.Editor
         /// 最直白的映射 —— **对象名就是契约**，名字写错在项目侧的契约校验里就能发现。
         /// </para>
         /// <para>
-        /// 引擎**不做**业务吸附（"落阻挡格就挪到最近可走格心"是项目规则，见 cs16 的 SnapMarkerToWalkable）；
+        /// 引擎**不做**业务吸附（"落阻挡格就挪到最近可走格心"是项目规则，由项目侧自己做）；
         /// 也不做名字白名单（引擎不知道哪些名字有意义）。留空根对象名 ⇒ 返回空数组 ⇒ 不写标记点段。
         /// </para>
         /// </summary>
@@ -487,8 +480,6 @@ namespace CloverEngine.Editor
                 Cells = new bool[o.MapWidth * o.MapDepth];
 
                 // ★ 取样柱以地面顶面（GroundTopY）为基准：ProbeBottomY / ProbeTopY 是**相对地面**的高度。
-                // 旧实现按绝对 Y 摆放（默认 0.2~2.2）：地面 Y≠0 的关卡（如地面在 10m）取样柱整根埋在
-                // 地面之下，逐格都不与障碍相交 → 烘出"全可走"空地图且无告警。
                 float probeBottomY = o.GroundTopY + o.ProbeBottomY;
                 float probeTopY = o.GroundTopY + o.ProbeTopY;
                 _half = new Vector3(o.CellSize * 0.5f, (probeTopY - probeBottomY) * 0.5f, o.CellSize * 0.5f);
@@ -577,8 +568,7 @@ namespace CloverEngine.Editor
 
         /// <summary>
         /// AABB 相交判定。★ 必须用**严格小于**：用 &lt;= 会把「仅与墙面相切」的邻格也算成阻挡，
-        /// 结果整张地图的可行走区被墙「外扩一格」，玩家隔着 1 米就撞空气墙
-        /// （曾观察到 64x64 地图阻挡数 784，实际应为约 388）。
+        /// 结果整张地图的可行走区被墙「外扩一格」，玩家隔着 1 米就撞空气墙。
         /// </summary>
         private static bool Intersects(Bounds b, Vector3 center, Vector3 half)
         {
@@ -618,8 +608,7 @@ namespace CloverEngine.Editor
 
             Debug.LogWarning($"{Tag} 场景里没有以 \"{o.SpawnMarkerPrefix}\" 开头的出生点标记，" +
                              "回退到「地图两角内缩 4m」—— 建议在关卡里摆标记以精确控制出生位置");
-            // ★ 地图尺寸的单位是**格**：换算成米必须乘 CellSize —— 旧实现漏乘，
-            //   CellSize≠1 时第二个角落到地图中间或图外，玩家一出生就被本地碰撞锁死。
+            // ★ 地图尺寸的单位是**格**：换算成米必须乘 CellSize。
             return new[]
             {
                 new Vector3(o.Origin.x + 4f, o.GroundTopY, o.Origin.z + 4f),
@@ -646,7 +635,7 @@ namespace CloverEngine.Editor
         /// <summary>
         /// <see cref="FitBoundsToScene"/> 的带结果版本：成功返回 true（<paramref name="message"/> 为一行推算结果），
         /// 失败返回 false（<paramref name="message"/> 为人类可读的原因）。
-        /// 面板据此把失败摆成错误态 —— 旧实现拿不到成败信息，推算失败也按成功样式显示。
+        /// 面板据此把失败摆成错误态。
         /// </summary>
         public static bool TryFitBoundsToScene(MapBakeOptions o, out string message)
         {

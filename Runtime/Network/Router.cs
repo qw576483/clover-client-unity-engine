@@ -71,7 +71,7 @@ namespace CloverEngine
                 BodyLength = length
             };
 
-            // 修复bug：在遍历前复制列表，避免handler中注册新handler导致InvalidOperationException
+            // 在遍历前复制列表，避免handler中注册新handler导致InvalidOperationException
             var handlersCopy = new List<MsgHandler>(list);
             foreach (var handler in handlersCopy)
             {

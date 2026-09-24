@@ -8,9 +8,7 @@ namespace CloverEngine.Tests
     /// <see cref="ResourceManifest"/> 惰性索引的失效语义回归。
     ///
     /// <para>
-    /// 旧缺陷：索引只按「列表元素个数是否变化」判失效 —— 外部在**数量不变**的情况下替换/重排内容时
-    /// 索引不重建，<see cref="ResourceManifest.Find"/> / <see cref="ResourceManifest.FindAsset"/>
-    /// 会静默返回陈旧条目。现在的契约是：
+    /// 契约是：
     /// ① 两个表**只读**（拿到手也改不动，不存在"绕过入口就地改"的路径）；
     /// ② 追加一律走 <c>AddFile</c> / <c>AddAsset</c>，它们就地让索引失效；
     /// ③ 另有 <c>InvalidateIndex()</c> 供自定义解析路径显式失效。

@@ -6,18 +6,16 @@
 //   ② PointerHoverRelay        —— 把 uGUI `IPointerEnter/ExitHandler` 转成两个回调的接线件；
 //   （① 的定位数学单独放在同文件的 PointerFloatPlacement —— 纯函数，离线可断言。）
 //
-// 出处（**照搬项目侧现版，不改数值**；用户本轮明说"可以改引擎、全部实现"）：
-//   clover-project-diablo2/client/Assets/Scripts/UI/ItemTooltip.cs:90-434
-//     · Create(Transform)  :154-174  —— 建"左上角为轴心"的浮层根 + 记下所属 Canvas
-//     · Show / Hide        :219-268  —— 显隐（尺寸由调用方按自己的内容算好）
-//     · Tick()             :271-309  —— 每帧：屏幕点 → 画布局部点 → 贴边翻转
-//     · 偏移常量           :110-111  —— CursorOffsetX = 22 / CursorOffsetY = -18（画布单位）
-//   clover-project-diablo2/client/Assets/Scripts/UI/HoverTarget.cs:24-43
-//     · `IPointerEnterHandler` / `IPointerExitHandler` → 两个 `Action` 回调（20 行、零耦合）
+// 机制口径：
+//     · 浮层根建为「左上角为轴心」+ 记下所属 Canvas；
+//     · Show / Hide —— 显隐（尺寸由调用方按自己的内容算好）；
+//     · 每帧：屏幕点 → 画布局部点 → 贴边翻转；
+//     · 指针偏移默认 CursorOffsetX = 22 / CursorOffsetY = -18（画布单位，可覆盖）；
+//     · 悬停接线 = `IPointerEnterHandler` / `IPointerExitHandler` → 两个 `Action` 回调（零耦合）。
 //
-// 为什么是引擎缺口（下沉前实测）：
+// 为什么是引擎缺口：
 //   · 全引擎 `IPointerEnterHandler|IPointerExitHandler|EventTrigger` **0 命中** ⇒ 业务要悬停反馈
-//     只能各自 `AddComponent` + 自己实现接口（项目侧 HoverTarget 就是这么来的）；
+//     只能各自 `AddComponent` + 自己实现接口；
 //   · `UIWidgets.cs` 的通用件只有 Toast / FloatText / Loading / Confirm / RedDot / Guide ——
 //     `FloatTextLayer` 跟随的是**世界坐标的投影**（`WorldToScreenPoint`），**不跟指针**；
 //     全引擎对"按指针定位的浮层"没有通用件。
@@ -25,13 +23,11 @@
 // ⛔ 本件只做**容器 / 定位 / 显隐 / 复用**：
 //   内容（底板 Image、文本框、字号、配色、换行测量、品质色…）**全部由调用方注入** ——
 //   本件不建任何 Text / Image，不含任何色值 / 文案 / 字号常量，不引用任何业务类型
-//   （例：Diablo2 的物品品质配色仍留在项目侧 `ItemTooltip`）。
+//   （例：物品品质配色仍留在业务侧）。
 //
 // ★ 为什么两件都放**新文件**，而不是并进 `UIWidgets.cs` / `UIWidgetControls.cs`：
 //   ① 同一能力族（指针悬停 → 跟随浮层），一处读得完；
-//   ② 那两个文件在本片开工时正被**并发片**修改（引擎工作区 `git status` 两者均为 `M`）——
-//      并入 = 冒着覆盖别人未提交改动的风险，新建文件与任何并发写不冲突；
-//   ③ ⛔ 与 `结构规则.md` §4.4「已有同类能力不准再起第二套」不冲突：这两件此前**不存在**。
+//   ② ⛔ 与 `结构规则.md` §4.4「已有同类能力不准再起第二套」不冲突：这两件是引擎里该能力族的首件。
 //
 // 定位契约（改一条 = 改所有调用方的观感，见 `PointerFloatPlacement.Resolve`）：
 //   · 浮层轴心 pivot = **(0, 1) 左上角** ⇒ 默认从指针的**右下**方向展开；
@@ -56,13 +52,13 @@ namespace CloverEngine
     /// </summary>
     public static class PointerFloatPlacement
     {
-        /// <summary>默认横向偏移：指针**右侧** 22（画布单位）—— 出处 `ItemTooltip.cs:110`。</summary>
+        /// <summary>默认横向偏移：指针**右侧** 22（画布单位）。</summary>
         public const float DefaultCursorOffsetX = 22f;
 
-        /// <summary>默认纵向偏移：指针**下方** 18（画布单位；负 = 向下）—— 出处 `ItemTooltip.cs:111`。</summary>
+        /// <summary>默认纵向偏移：指针**下方** 18（画布单位；负 = 向下）。</summary>
         public const float DefaultCursorOffsetY = -18f;
 
-        /// <summary>默认离画布边的留白 —— 出处 `ItemTooltip.cs:305-306` 的 `4f`。</summary>
+        /// <summary>默认离画布边的留白（4f）。</summary>
         public const float DefaultEdgeMargin = 4f;
 
         /// <summary>用默认偏移 / 留白解算浮层位置（<paramref name="size"/> 由调用方按自己的内容算好）。</summary>
@@ -83,11 +79,6 @@ namespace CloverEngine
         /// <item>兜底夹进画布（<c>[xMin+margin, xMax-margin-宽]</c> / <c>[yMin+margin+高, yMax-margin]</c>）——
         ///       浮层比画布还大 / 指针在画布外时，夹取区间会退化成单点（左对齐 / 顶对齐），**确定性且不抖**。</item>
         /// </list>
-        /// <para>
-        /// ⚠️ 与项目侧改动前的口径**只有一处不同**（其余逐位相同）：改动前用 <c>sizeDelta * 0.5</c> 当"半尺寸"
-        /// 判越界、且翻转后是"把框重新居中到指针附近"⇒ 贴边时**提前一整半尺寸**翻转、且框会压住指针。
-        /// 本件按上面的契约改对了（项目侧视觉差异见交付回报的逐行比对表）。
-        /// </para>
         /// </summary>
         /// <param name="pointerLocal">指针画布局部点（须是有限值；本件不对指针做兜底，因为坐标来源自带 bool 失败态）。</param>
         /// <param name="size">浮层尺寸（画布单位）。</param>
@@ -183,7 +174,7 @@ namespace CloverEngine
         /// 在 <paramref name="parent"/> 下建一个浮层（默认隐藏 —— 调用方首次 <see cref="Show"/> 才可见）。
         /// </summary>
         /// <param name="parent">宿主（通常是面板自己的根节点；<c>null</c> ⇒ 挂到场景根，通常取不到画布）。</param>
-        /// <param name="name">节点名（默认 <c>PointerFloat</c>；调用方按自己的层次命名习惯改，例如 <c>ItemTooltip</c>）。</param>
+        /// <param name="name">节点名（默认 <c>PointerFloat</c>；调用方按自己的层次命名习惯改）。</param>
         /// <param name="canvas">画布矩形；<c>null</c> ⇒ 从 <paramref name="parent"/> 向上找（取不到时降频 Warn）。</param>
         public static PointerFloatLayer Create(Transform parent, string name = "PointerFloat", RectTransform canvas = null)
         {
@@ -345,10 +336,10 @@ namespace CloverEngine
     /// </summary>
     public class PointerHoverRelay : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
     {
-        /// <summary>指针进入时调用（未接线 = <c>null</c> ⇒ 什么都不做）。</summary>
+        /// <summary>指针进入时调用（未给 = <c>null</c> ⇒ 什么都不做）。</summary>
         public Action OnEnter;
 
-        /// <summary>指针离开时调用（未接线 = <c>null</c> ⇒ 什么都不做）。</summary>
+        /// <summary>指针离开时调用（未给 = <c>null</c> ⇒ 什么都不做）。</summary>
         public Action OnExit;
 
         /// <inheritdoc/>

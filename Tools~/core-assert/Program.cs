@@ -1,5 +1,5 @@
 // 离线断言宿主：链接**真实的**引擎源码（Runtime/Core/{Json,Event,Setting}.cs），
-// 断言本轮客户端修复项的行为。用完即删（属 <项目根>/.ai-tmp/test/）。
+// 断言 Setting 原子写 / 往返 / 损坏留档的行为。
 //
 // 运行：
 //   dotnet run                                  # 常驻平台：Setting 原子写 + 往返 + 损坏留档
@@ -57,7 +57,7 @@ internal static class Program
         }
         Check("循环引用抛异常（不是栈溢出）", threw, kind);
 
-        // ② 浮点保型：整数值的 double 往返回来仍是 double（旧实现会退化成 long）
+        // ② 浮点保型：整数值的 double 往返回来仍是 double
         var dumped = MiniJson.Dump(1.0d);
         Check("Dump(1.0d) 输出带小数点", dumped == "1.0", dumped);
         Check("Parse(\"1.0\") 是 double", MiniJson.Parse("1.0") is double);
@@ -159,7 +159,7 @@ internal static class Program
                     text.Contains("line-1") && text.Contains("line-2") && text.Contains("line-3"));
             }
 
-            // ② 跨天切文件：把私有的 RotateIfNeeded 用"另一天"调一次（旧实现会因日期被调用方提前改写而不切）
+            // ② 跨天切文件：把私有的 RotateIfNeeded 用"另一天"调一次
             var mi = typeof(Logger).GetMethod("RotateIfNeeded", BindingFlags.Instance | BindingFlags.NonPublic);
             Check("能取到 RotateIfNeeded（实现未改名）", mi != null);
             if (mi != null)
@@ -168,13 +168,13 @@ internal static class Program
                 var rotated = Path.Combine(dir, "2001-01-01.log");
                 Check("跨天切出新文件 2001-01-01.log", File.Exists(rotated), rotated);
                 // 日期由**写线程自己**取（Logger.cs:294）：强制切走后，下一条日志应被写线程
-                // 按"当前日期"再切回当天文件 —— 这正是修复后的语义（旧实现永不切）。
+                // 按"当前日期"再切回当天文件。
                 lg.Info("Assert", "after-rotate");
                 Thread.Sleep(400);
                 Check("写线程自行取日期 → 下一条落回当天文件", ReadAllTextShared(expect).Contains("after-rotate"));
             }
 
-            // ③ 旧实现的畸形产物：目录里不该出现 `.log` 这种无名文件
+            // ③ 畸形产物：目录里不该出现 `.log` 这种无名文件
             Check("无 `.log` 无名文件（旧缺陷形态）", !File.Exists(Path.Combine(dir, ".log")));
         }
 
@@ -209,7 +209,7 @@ internal static class Program
         var s2 = new Setting(dir);
         Check("往返: 新实例读回同一值", s2.Get<string>("k") == "v", s2.Get<string>("k"));
 
-        // 损坏配置：不抛异常，回退默认值并留档 .corrupt（旧实现会把异常抛给 Game.Launch）
+        // 损坏配置：不抛异常，回退默认值并留档 .corrupt
         File.WriteAllText(file, "{{{ not json");
         var s3 = new Setting(dir);
         Check("损坏配置: 不抛异常且回退默认值", s3.Get("k", "def") == "def", s3.Get("k", "def"));

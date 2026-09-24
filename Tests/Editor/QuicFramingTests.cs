@@ -33,9 +33,7 @@ namespace CloverEngine.Tests
         [Test]
         public void Encode_KeepAlive_IsWellFormedEmptyClientFrame()
         {
-            // ★ 保活消息号必须**引用生产常量**（QuicConnection.KeepAliveMsgId），不能再写字面量：
-            //   旧实现硬编码 4001（恰为 EMsg.PushPlayerFullSync）并断言 0x00000FA1，而生产实际用 0 ——
-            //   测试钉住的值与实际发送的保活帧毫无关系，真实保活消息号被改错也不会变红。
+            // ★ 保活消息号必须**引用生产常量**（QuicConnection.KeepAliveMsgId），不能再写字面量。
             //   （该常量是 private const，在不改 Runtime 的约束下只能反射读取；取不到说明生产代码被重构，直接红。）
             var field = typeof(QuicConnection).GetField("KeepAliveMsgId",
                 BindingFlags.NonPublic | BindingFlags.Static);

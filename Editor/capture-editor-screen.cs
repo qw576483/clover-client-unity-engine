@@ -71,10 +71,6 @@ namespace CloverEngine.Editor
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-        // 2026-09-23 实测：`HWND_TOPMOST + SWP_SHOWWINDOW` **拉不回最小化的窗口** —— 编辑器一旦被
-        // 最小化，窗口矩形恒为 `-32000,-32000 160x28`，`GameViewRect()` 跟着跑到屏外，`BitBlt`
-        // 于是采到**纯黑**（三张 `_abr-*.png` 各 10798 B、meanRGB=0.00、sha256 三同）。补这两个
-        // API 才能做到"先还原、再置顶"。
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int nCmdShow);
         [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
         public delegate bool EnumProc(IntPtr h, IntPtr lp);
@@ -128,9 +124,6 @@ namespace CloverEngine.Editor
         //
         // 判据与 `tools/probes/probe-ui-visibility.cs` 的 FindProjectRoot() **逐字同口径**
         // （⛔ 不另造第二套）：项目根 = **同时**含 `client/` 与 `.ai-tmp/` 的那一层。
-        // 为什么不只找"第一个含 .ai-tmp 的祖先"：本机实测 `client/.ai-tmp/screenshots/…` 曾存在
-        // （别的切片把相对路径写歪了）⇒ 只判 `.ai-tmp` 会把 spec 路径解析到 `client/.ai-tmp/`
-        // 并回 "spec missing"。这里是**防复发**，不是修当前故障。
         private static string FindProjectRoot()
         {
             var d = new DirectoryInfo(Application.dataPath);
@@ -152,7 +145,7 @@ namespace CloverEngine.Editor
             var dir = Path.Combine(FindProjectRoot(), ".ai-tmp", "test");
             var preferred = Path.Combine(dir, "editor-shot-spec.txt");
             if (File.Exists(preferred)) return preferred;
-            var legacy = Path.Combine(dir, "bv-shot-spec.txt");   // 兼容 cs16 时代的旧名
+            var legacy = Path.Combine(dir, "bv-shot-spec.txt");   // 兼容备用文件名
             return File.Exists(legacy) ? legacy : preferred;
         }
 

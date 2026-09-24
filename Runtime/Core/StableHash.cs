@@ -4,23 +4,20 @@
 //   ① FNV-1a 64 位稳定哈希（同 seed 两次生成必须同哈希 —— 日志里贴一行哈希就够）；
 //   ② 网格 → ASCII 字符画 dump（人可读快照：一眼分出"这条是河"还是"这条是石头"）。
 //
-// 出处：clover-project-diablo2 `client/Assets/Scripts/Module/Map/MapDebug.cs:68-110, 129-134`
-//   · `Hash(GridMap)`（:92-110）= 常量 `14695981039346656037UL` / `1099511628211UL`、
+// 口径（**顺序与常量即契约**）：
+//   · 逐格哈希 = 常量 `14695981039346656037UL` / `1099511628211UL`、
 //     **先混 width / height、再按 y 外层升序 x 内层升序逐格混入地形码**、`h.ToString("X16")`；
-//   · `DumpAscii(GridMap, maxRows)`（:68-89）= 行首 `y.ToString("D3") + '|'`、
-//     首行图例、`maxRows > 0` 只输出顶部若干行（地图北端在上）。
-//   本类逐条复刻这两处口径（连"先宽高、后逐格"与 "D3 + '|'" 都保留），
-//   ⛔ 但把"什么算一格 / 一格是什么字符"改成**调用方传委托** —— 引擎不认 `GridMap` / `TileKind` 这类项目语义。
+//   · ASCII dump = 行首 `y.ToString("D3") + '|'`、首行图例、`maxRows > 0` 只输出顶部若干行（地图北端在上）。
+//   ⛔ "什么算一格 / 一格是什么字符"由**调用方传委托** —— 引擎不认地图容器 / 地形枚举这类项目语义。
 //
-// 为什么下沉：任何程序化生成（地图 / 关卡 / 迷宫 / 随机布置）都要同一套"**同 seed 复现**"判据，
+// 设计依据：程序化生成（地图 / 关卡 / 迷宫 / 随机布置）靠同一套"**同 seed 复现**"判据，
 //   而"肉眼比对图"既慢又不可判 —— 一行哈希 + 一张字符画是**离线可断言**的最小证据面。
-//   各项目各写一份的代价已被验证：哈希常量写错（off-by-one 的 prime）与"逐格顺序不一致"
-//   都会让**两条日志看起来都对、却永远对不上**，且不报错。
+//   ⛔ 哈希常量写错（off-by-one 的 prime）或"逐格顺序不一致"都会让**两条日志看起来都对、
+//   却永远对不上**，且不报错 —— 故常量与顺序都必须集中在本件一处。
 //
-// 用法 + 首个消费方：
+// 用法：
 //   `var hex = StableHash.HashGridHex(w, h, ReadKind);`   // ReadKind = (x, y) => (byte)map.Get(x, y)
 //   `Game.Logger.Info("Map", StableHash.ToAscii(w, h, CharOf, "图例: . 可走 / # 阻挡", maxRows: 12));`
-//   项目侧 `Module/Map/MapDebug` 的 `Hash` / `DumpAscii` 是它的薄封装（收尾片接线，本片不改项目文件）。
 //
 // 边界（⛔ 防止当万能药用）：
 //   · 委托签名是 **(x, y)**，与 `GridUtil` / `Vector2Int` 同序（⛔ 不是 (row, col)）；
@@ -43,7 +40,7 @@ namespace CloverEngine
     public delegate char GridCellCharReader(int x, int y);
 
     /// <summary>
-    /// 稳定哈希 + 网格字符画（FNV-1a 64 位；口径见文件头「出处」）。
+    /// 稳定哈希 + 网格字符画（FNV-1a 64 位；口径见文件头）。
     /// <para>FNV-1a 的**稳定**含义：同输入恒得同值、跨机器 / 跨平台 / 跨 Unity 版本一致
     /// （⛔ 不用 <c>string.GetHashCode()</c> —— 它在 .NET Core 起**每进程随机化**，日志对不上）。</para>
     /// </summary>
@@ -51,10 +48,10 @@ namespace CloverEngine
     {
         private const string Tag = "StableHash";
 
-        /// <summary>FNV-1a 64 位偏移基（<c>hash := offset</c>；出处见文件头）。</summary>
+        /// <summary>FNV-1a 64 位偏移基（<c>hash := offset</c>；口径见文件头）。</summary>
         public const ulong OffsetBasis = 14695981039346656037UL;
 
-        /// <summary>FNV-1a 64 位质数（每步 <c>hash *= prime</c>；出处见文件头）。</summary>
+        /// <summary>FNV-1a 64 位质数（每步 <c>hash *= prime</c>；口径见文件头）。</summary>
         public const ulong Prime = 1099511628211UL;
 
         /// <summary>FNV-1a 64 位：把 <paramref name="value"/> 混进已有哈希（<c>hash ^= value; hash *= prime</c>）。</summary>
@@ -95,7 +92,7 @@ namespace CloverEngine
         public static ulong Fnv1a64(string text)
             => string.IsNullOrEmpty(text) ? OffsetBasis : Fnv1a64(Encoding.UTF8.GetBytes(text));
 
-        /// <summary>哈希 → 16 位大写十六进制（日志里贴它；`"X16"` 口径同出处）。</summary>
+        /// <summary>哈希 → 16 位大写十六进制（日志里贴它；`"X16"` 口径见文件头）。</summary>
         public static string Hex(ulong hash) => hash.ToString("X16");
 
         /// <summary>
@@ -144,7 +141,7 @@ namespace CloverEngine
         /// <param name="header">首行说明 / 图例（可为 null ⇒ 不打首行）。</param>
         /// <param name="maxRows">最多输出多少行（<c>&lt;= 0</c> = 全部；大图默认只打头部若干行，否则刷屏）。</param>
         /// <param name="northFirst">true = y 从大到小（北在上）；false = y 从 0 升序。</param>
-        /// <param name="rowLabelDigits">行首 y 的位数（出处用 3）。</param>
+        /// <param name="rowLabelDigits">行首 y 的位数（默认 3）。</param>
         public static string ToAscii(int width, int height, GridCellCharReader charOf,
             string header = null, int maxRows = 0, bool northFirst = true, int rowLabelDigits = 3)
         {

@@ -5,22 +5,15 @@ namespace CloverEngine
     /// <summary>
     /// 相机相关的**纯函数**：水平/垂直 FOV 换算、yaw/pitch → 视线方向、指数平滑跟随、临界阻尼跟随。
     ///
-    /// <para><b>出处</b>：能力下沉。三个函数搬自 <c>clover-project-cs16</c> 的
-    /// <c>client/Assets/Scripts/Module/CameraRig/FirstPersonCamera.cs</c>（<b>逐字搬移</b>，
-    /// 数值与分支一个都没动 —— 那是已验收的 FOV 口径与镜头手感）；原处**已改为调用本件**、
-    /// ⛔ 不留同名 `private static` 副本。</para>
+    /// <para>本件是这些口径与镜头跟随的唯一实现，⛔ 不留同名 `private static` 副本。</para>
     ///
-    /// <para><b>为什么合并成三个</b>（`结构规则.md` §4.4「已有能力不准再起第二套」）：原项目里还有一个
-    /// <c>FollowRecoil(current, target, dt)</c>，它**只是**「按 |target| &gt; |current| 在上升/回落两个
-    /// 时间常数里挑一个，再调 <see cref="Follow"/>」—— 挑常数用的是业务手感数值，属调用点的事，
+    /// <para><b>为什么合并成三个</b>（`结构规则.md` §4.4「已有能力不准再起第二套」）：按
+    /// |target| &gt; |current| 在上升/回落两个时间常数里挑一个，用的是业务手感数值、属调用点的事，
     /// 所以这里**只留一条 <see cref="Follow"/>**，那两行选择就地内联在调用点，⛔ 不留第二份跟随实现。</para>
     ///
-    /// <para><b>★ 本片新增两条（镜头跟随抖动 / 能力下沉）</b>：
-    /// <see cref="Follow(Vector3,Vector3,float,float)"/> 与
-    /// <see cref="SmoothDamp(Vector3,Vector3,ref Vector3,float,float)"/>。
-    /// 前者逐字复用既有 float 版公式（同一口径的 Vector3 重载）；
-    /// 后者是**临界阻尼**跟随（带速度状态），下沉自 <c>clover-project-diablo2</c> 的相机跟随
-    /// （原实现是「纯指数滞后」，在 8 向锯齿路径上滞后矢量每换向转 45° ⇒ 画面左右摆）。
+    /// <para><b>另两条</b>：<see cref="Follow(Vector3,Vector3,float,float)"/> 与
+    /// <see cref="SmoothDamp(Vector3,Vector3,ref Vector3,float,float)"/> ——
+    /// 前者是同一口径的 Vector3 重载，后者是**临界阻尼**跟随（带速度状态）。
     /// ⛔ 两处都只允许这一个实现，业务侧不许再写同名私有副本。</para>
     /// </summary>
     public static class CameraMath
@@ -76,8 +69,8 @@ namespace CloverEngine
         /// <para><c>k = 1 - exp(-dt/tau)</c> 后 <c>Lerp</c>：<c>dt→0</c> 时不跳变、逐步趋近 target；
         /// <paramref name="tau"/> &lt;= 0 视为"不平滑"，直接返回 target。</para>
         ///
-        /// <para><b>合并口径</b>（见类注释）：原项目的 <c>FollowRecoil</c> = 先按
-        /// <c>|target| &gt; |current|</c> 判"是在上跳还是回正"，选各自的 tau，再调本函数 ——
+        /// <para><b>合并口径</b>（见类注释）：按
+        /// <c>|target| &gt; |current|</c> 判"是在上跳还是回正"、选各自的 tau，再调本函数 ——
         /// 那一步选择用的是业务手感数值 ⇒ 留在调用点内联，引擎只提供这一条跟随。</para>
         /// </summary>
         /// <param name="current">当前值。</param>
@@ -94,12 +87,8 @@ namespace CloverEngine
         /// <summary>
         /// 指数平滑跟随的 **Vector3 重载**：把 <paramref name="current"/> 朝 <paramref name="target"/> 拉。
         ///
-        /// <para><b>出处 / 下沉记录</b>：逐字复用上方 float 版的公式（<c>k = 1 - exp(-dt/tau)</c> +
-        /// <c>Lerp</c>，两个早退分支一致），**数值口径一字未改** —— 它下沉自
-        /// <c>clover-project-diablo2</c> 的 <c>Module/Camera/CameraRig.SmoothTowards</c>
-        /// （该文件的原注释写「与引擎 ThirdPersonCamera 同风格」）；原处的那份私有实现已删除、
-        /// 改为调用本件（⛔ 不留第二份）。同项目 `tools/probes/hosts/playercheck` 直接断言
-        /// 「本重载与 float 版同公式」。</para>
+        /// <para><b>口径</b>：公式与上方 float 版相同（<c>k = 1 - exp(-dt/tau)</c> +
+        /// <c>Lerp</c>，两个早退分支一致）⇒ ⛔ 不留第二份实现。</para>
         ///
         /// <para>⚠️ 与 <c>dt</c> 的关系：<c>dt &lt;= 0</c>（暂停 / 首帧）时返回 <paramref name="current"/>
         /// —— 调用方因此不需要自己判 <c>dt</c>。注意 float 版没有这一支（它的 <c>dt=0</c> 靠
@@ -137,7 +126,7 @@ namespace CloverEngine
         /// <para><b>稳态滞后（调用方要拿它算数值）</b>：连续域的二阶临界阻尼方程
         /// <c>y'' + 2ωy' + ω²y = ω²x</c>（<c>ω = 2/smoothTime</c>）在目标匀速 <c>v</c> 下的稳态解是
         /// <c>y = v·t − v·smoothTime</c> ⇒ 连续解析滞后 <c>= v × smoothTime</c>（与一阶的 <c>v × tau</c> 同式）。
-        /// **Unity 的离散实现滞后更小**：本机实测（`tools/probes/hosts/playercheck` 的稳态行，
+        /// **Unity 的离散实现滞后更小**：本机实测（宿主探针的稳态行，
         /// <c>v=3 格/s</c>、<c>smoothTime=0.02s</c>、<c>dt=1/60</c>）= 0.0346 格 = 解析值的 **0.577 倍**
         /// ⇒ 调用方要判"滞后上界"就用 <c>v × smoothTime</c>（保守），要判"实测值"就用 0.58 倍这一系数。
         /// 即：要消掉"换向摆幅"，靠的是把 <c>smoothTime</c> 取小；要消掉"过冲/振荡"，靠的是临界阻尼。</para>
@@ -159,14 +148,12 @@ namespace CloverEngine
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
-        // ★ eng-camera-math 片（2026-09-24）：相机的**正交视口 / 屏幕 / 格**换算下沉
+        // ★ 相机的**正交视口 / 屏幕 / 格**换算（纯函数，与题材无关）
         //
-        // 出处：clover-project-diablo2 的 client/Assets/Scripts/Module/Camera/CameraRig.cs
-        //   里那批 `public static` 纯函数（与题材无关、**算法与分支逐行同源**）。原处已改为
-        //   调用本件（⛔ 不留第二份同名实现）。本片**只下沉这六个**：
+        //   本件提供这六个（⛔ 不留第二份同名实现）：
         //     WorldToViewport / WorldToScreen / EdgeScrollOffset / ShakeMagnitude /
         //     VisibleGridRect / Zoomed。
-        //   ⛔ 仍留在项目侧的（含项目语义，不下沉）：`MapWorldBounds`（等距菱形外接矩形）、
+        //   ⛔ 下列含项目语义，不在本件：`MapWorldBounds`（等距菱形外接矩形）、
         //     `ClampFocus`（世界 AABB 口径的对照件）、`DesiredPosition`（机位 z）、
         //     `CameraPosForFocus/CameraPosForCamera`、`StepFollow` / `ClampForAspect`（单帧 tick 结构）。
         //
@@ -179,10 +166,8 @@ namespace CloverEngine
         /// 与 `Camera.WorldToViewportPoint` 同语义（不旋转、世界是 z=0 的 XY 平面 ⇒ 只剩 xy 平移缩放）。
         ///
         /// <para><b>为什么需要它（不是重复实现）</b>：`Camera.WorldToScreenPoint` 是**原生调用**，
-        /// 离线自检宿主（`tools/*check`，非 Unity 进程）里用不了 ⇒ 「焦点世界坐标 → 屏幕中心」
-        /// 这条验收断言就永远没法离线自证。本函数把这段换算抽成纯数学，宿主可直接断言。
-        /// 出处 = <c>clover-project-diablo2</c>
-        /// <c>client/Assets/Scripts/Module/Camera/CameraRig.cs</c> 的 <c>WorldToViewport</c>（逐行同源）。</para>
+        /// 离线自检宿主（非 Unity 进程）里用不了 ⇒ 「焦点世界坐标 → 屏幕中心」
+        /// 这条验收断言就永远没法离线自证。本函数把这段换算抽成纯数学，宿主可直接断言。</para>
         ///
         /// <para><b>退化分支</b>：<paramref name="orthoSize"/> ≤ 0 或 <paramref name="aspect"/> ≤ 0
         /// ⇒ 返回 <c>NaN</c> 并**只报一次** Warn（返回 NaN 会让断言**明确失败**，
@@ -210,8 +195,7 @@ namespace CloverEngine
         /// <summary>
         /// 世界坐标 → **屏幕像素坐标**（左下原点）—— 与 `Camera.WorldToScreenPoint` 同语义。
         /// 由 <see cref="WorldToViewport"/> 乘以屏幕尺寸得到（「焦点 → 屏幕中心」这类断言用它）。
-        /// <para>出处 = <c>clover-project-diablo2</c> <c>Module/Camera/CameraRig.cs</c> 的
-        /// <c>WorldToScreen</c>（逐行同源）。参数非法时沿 <see cref="WorldToViewport"/> 返回 <c>NaN</c>。</para>
+        /// <para>参数非法时沿 <see cref="WorldToViewport"/> 返回 <c>NaN</c>。</para>
         /// </summary>
         public static Vector2 WorldToScreen(Vector3 world, Vector3 camPos, float orthoSize, float aspect,
             float screenW, float screenH)
@@ -229,8 +213,7 @@ namespace CloverEngine
         /// 幅度按"离边的距离 / 边距"线性（<c>1 − clamp01(dist/margin)</c>）——
         /// 恰在边界上（<c>dist = margin</c>）幅度为 0 ⇒ 无跳变。</para>
         ///
-        /// <para>出处 = <c>clover-project-diablo2</c> <c>Module/Camera/CameraRig.cs</c> 的
-        /// <c>EdgeScrollOffset</c>（逐行同源）。退化分支：屏幕尺寸 / 边距 / 满偏任一 ≤ 0 ⇒ 返回 <c>zero</c>
+        /// <para>退化分支：屏幕尺寸 / 边距 / 满偏任一 ≤ 0 ⇒ 返回 <c>zero</c>
         /// （取不到 `Screen` 尺寸时调用方不必自己兜底）。</para>
         /// </summary>
         /// <param name="pointer">指针屏幕坐标（左下原点）。</param>
@@ -258,12 +241,9 @@ namespace CloverEngine
         /// 震动偏移的**线性衰减幅度**：<c>t = 0</c> 时 = <paramref name="amplitude"/>，
         /// <c>t ≥ duration</c> 时 = 0，中间线性；幅度 / 时长 ≤ 0 ⇒ 恒 0。
         ///
-        /// <para><b>只给幅度、不给方向</b>：方向函数（三角函数 / 随机单位圆 / Perlin）是各项目的镜头手感，
-        /// 由调用方自己乘上去（`clover-project-diablo2` 用的是"角频率 × t 的三角函数"，
-        /// 那条**没有**下沉 —— 它带项目的角频率常量）。</para>
-        ///
-        /// <para>出处 = <c>clover-project-diablo2</c> <c>Module/Camera/CameraRig.cs</c> 的
-        /// <c>ShakeMagnitude</c>（逐行同源）。</para>
+        /// <para><b>只给幅度、不给方向</b>：方向函数（三角函数 / 随机单位圆 / Perlin）是调用方的镜头手感，
+        /// 由调用方自己乘上去（如"角频率 × t 的三角函数"，那条**不归本件** ——
+        /// 它带调用方的角频率常量）。</para>
         /// </summary>
         /// <param name="amplitude">起始幅度（> 0 才有意义）。</param>
         /// <param name="duration">震动总时长（秒）。</param>
@@ -286,9 +266,7 @@ namespace CloverEngine
         /// —— 这里没有直接调 <see cref="IsoLayout"/> 是因为它是**实例类**（构造要带排序参数，
         /// 与几何无关），而本件按「格尺寸参数」的口径给式；离线宿主有等价断言把两者逐点钉住。</para>
         ///
-        /// <para>出处 = <c>clover-project-diablo2</c> <c>Module/Camera/CameraRig.cs</c> 的
-        /// <c>VisibleGridRect</c>（逐行同源；原处调项目的 <c>Iso.WorldToGridContinuous</c>）。
-        /// 用途举例：量"生产机位在四条边上越界了多少格"（贴边不露虚空）。</para>
+        /// <para>用途举例：量"生产机位在四条边上越界了多少格"（贴边不露虚空）。</para>
         /// </summary>
         /// <param name="camX">机位世界 x（正交、不旋转 ⇒ 视口的对称中心）。</param>
         /// <param name="camY">机位世界 y。</param>
@@ -324,9 +302,6 @@ namespace CloverEngine
 
         /// <summary>
         /// 缩放取值：把 <c>current + delta</c> 钳进 <c>[min, max]</c>（滚轮缩放一步之后该取多少）。
-        ///
-        /// <para>出处 = <c>clover-project-diablo2</c> <c>Module/Camera/CameraRig.cs</c> 的
-        /// <c>Zoomed</c>（逐行同源，就是一次 <c>Mathf.Clamp</c>）。</para>
         ///
         /// <para>⚠️ <b>只钳制、不取整 / 不做步进吸附</b>：取整（吸附到某个步长）是**调用方口径**
         /// ——「步长取多少」是玩法/手感数值、每个项目不同 ⇒ ⛔ 引擎不预设（要就由调用方在返回值上再做）。</para>

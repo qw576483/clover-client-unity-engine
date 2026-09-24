@@ -1,12 +1,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/GridGraph.cs
 // 格子图**通用算法底座**（8 邻接 BFS 连通性 / 边界环封 / 可走格索引与 O(1) 抽样 /
-// 矩形·直线·圆盘批写）—— 纯逻辑、无状态、不持有任何 Unity 对象。下沉到引擎。
+// 矩形·直线·圆盘批写）—— 纯逻辑、无状态、不持有任何 Unity 对象。
 //
-// 出处：Diablo2 项目 `client/Assets/Scripts/Module/Map/GridMap.cs`（**逐行等价搬运**）。
-//   被搬走的行（旧行号）：8 邻接表 `:28-32` · 批操作 `:332-480` · 边界环封 `SealBorderRing :386-411`
-//   · 可走格缓存 + O(1) 抽样 `:521-536` · BFS 连通性 / 孤立口袋填充 / 必需可达校验 `:557-652`。
-//   ⛔ **没搬**：`TileKind` / `TileKindInfo` / `AreaId` / 原版地形语义 / 地图名 / `MapLog`
+// ⛔ **不属本件**：地形枚举 / 地形属性表 / 区域 id / 原版地形语义 / 地图名 / 业务日志
 //   —— 全部留在项目侧；引擎件一律用**回调**替代（`Func<Vector2Int,bool> isWalkable` +
 //   `Action<int,int> write`），因此引擎不认识任何一款游戏的地形枚举。
 //
@@ -14,30 +11,29 @@
 //   ① **与 `CloverEngine.AStar` 同一种形状** —— `AStar.Find(Func<Vector2Int,bool> walkable, …)`
 //      本来就是回调式。本件的 `isWalkable` 与它是**同一个委托类型、同一套越界口径**
 //      ⇒ 业务侧同一个 `Walkable` 方法组可以**同时**喂给 AStar 和本件，
-//      不会出现「BFS 说通、A* 走不过去」的假通过（这正是旧 `GridMap.FloodFillFrom`
-//      注释里点名的风险）。
+//      不会出现「BFS 说通、A* 走不过去」的假通过。
 //   ② 引擎自持位图就要自己管「谁写格、什么时候重建」，那是地图容器的职责（`ITileWorld` 那种）；
 //      本件只做**算法**，格数据仍归业务。
 //
 // ★ 两条**契约**（调用方必须满足，否则结果无意义；引擎不替调用方兜底）：
-//   ① `isWalkable` 对**图外坐标必须返回 false**（与 `AStar` 的 `walkable` 契约逐字相同）；
+//   ① `isWalkable` 对**图外坐标必须返回 false**（与 `AStar` 的 `walkable` 契约一致）；
 //   ② `width` / `height` 是**真实格数**，`visited` 必须由调用方按 `[width, height]` 分配且初值全 false。
 //   违反 ① 的典型症状：BFS 从地图外绕过去（而 AStar 不会），于是自检通过、实际走不通。
 //
-// ★ 邻接 / 对角口径（**逐字照搬旧实现**，⛔ 不许"顺手优化"）：
+// ★ 邻接 / 对角口径（⛔ 不许"顺手优化"）：
 //   8 邻接、前 4 直走后 4 斜走；**对角要求两侧格都可走**（否则 BFS 会贴着墙角穿过去）。
 //   这条与 `AStar.Neighbors` / `AStar.Find` 的对角判定必须**保持逐行一致** ——
 //   两处任何一处改口径，都会产生「可达性自检通过、寻路失败」的静默不一致。
 //
 // ★ 可走格索引（`WalkableIndex`）为什么值得单独成件：
-//   在「大部分是墙」的洞里**均匀随机撒点**几乎全落空（旧注释原话）。缓存成列表后
+//   在「大部分是墙」的洞里**均匀随机撒点**几乎全落空。缓存成列表后
 //   `Pick(rng.Next(Count))` 是 **O(1)**，既快又天然不空手而归。
 //   ⚠️ **遍历顺序是契约的一部分**：`Rebuild` 的填充顺序 = `x` 外层升序、`y` 内层升序
-//   （与旧 `RecountIfNeeded` 逐字一致）⇒ 同一 seed 的抽样序列才可逐项复现。
+//   ⇒ 同一 seed 的抽样序列才可逐项复现。
 //   ⛔ 换顺序不会报错，只会让「同 seed 两次生成的刷怪/掉落落点」不再一致。
 //
 // ★ ⛔ **本件不做**：寻路（走 `AStar`）、位移解算、任何地形枚举语义、任何日志埋点
-//   （`MapLog` / 业务日志一律留在业务侧；本件只对「调用方违约」这类**编程错误**留痕，
+//   （业务日志一律留在业务侧；本件只对「调用方违约」这类**编程错误**留痕，
 //   用引擎 `LogThrottle`，见 `Runtime/Core/LogThrottle.cs`）。
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -66,9 +62,8 @@ namespace CloverEngine
         /// 两处顺序不一致排查起来极其隐蔽（结果"看起来都对"，只是序列不同）。
         /// </para>
         /// <para>
-        /// ⚠️ **与 `AStar.Neighbors` 目前仍是两份字面量相同的表**（`Runtime/Core/AStar.cs:38-42`）——
-        /// 本轮下沉按授权范围**未改既有文件**，故没有把 `AStar` 改成引用本表。
-        /// 两者若要收敛成一份，需另行授权改 `AStar.cs`（已登记在片回报的「未决」里）。
+        /// ⚠️ **与 `AStar.Neighbors` 目前是两份字面量相同的表**（`Runtime/Core/AStar.cs:38-42`）——
+        /// 两者必须**同值同序**，改一处必须同步另一处。
         /// </para>
         /// </summary>
         public static readonly Vector2Int[] Neighbors8 =
@@ -160,7 +155,7 @@ namespace CloverEngine
         /// <returns>不可达的目标数。<paramref name="targets"/> 为 null/空 ⇒ 0。</returns>
         /// <remarks>
         /// ⚠️ <paramref name="reachedCount"/> == 0 时**本方法仍会数**（结果是「全部目标都不可达」）。
-        /// 调用方必须先判 <c>reachedCount == 0</c> 并当作整体失败提前返回 —— 旧实现就是这么做的。
+        /// 调用方必须先判 <c>reachedCount == 0</c> 并当作整体失败提前返回。
         /// </remarks>
         public static int CountUnreachableTargets(Func<Vector2Int, bool> isWalkable, int width, int height,
             Vector2Int from, IReadOnlyList<Vector2Int> targets,
@@ -191,7 +186,7 @@ namespace CloverEngine
         /// <summary>
         /// 把「从 <paramref name="from"/> 走不到的孤立可走口袋」逐格交给 <paramref name="fill"/> 去填。
         /// <para>
-        /// 为什么必须做（旧实现注释原话）：随机撒点（掉落 / 刷怪）一旦落进这种口袋，
+        /// 为什么必须做：随机撒点（掉落 / 刷怪）一旦落进这种口袋，
         /// 掉落物永远拿不到、怪物永远打不了 —— 静默的玩法缺陷。
         /// </para>
         /// </summary>
@@ -221,8 +216,8 @@ namespace CloverEngine
             }
 
             var filled = 0;
-            // ⛔ 遍历顺序（x 外层升序、y 内层升序）与旧实现逐字一致：填充顺序决定不了结果，
-            //    但保持同序可以让「改前/改后」的逐行取证脚本直接 diff。
+            // ⛔ 遍历顺序固定为 x 外层升序、y 内层升序：填充顺序决定不了结果，
+            //    但同序可让逐行取证脚本直接 diff。
             for (var x = 0; x < width; x++)
             {
                 for (var y = 0; y < height; y++)
@@ -248,7 +243,7 @@ namespace CloverEngine
         /// 逐格交给 <paramref name="seal"/> 去封成不可走地形。
         /// <para>
         /// 为什么封环而不是在相机侧夹：相机侧夹要求「机位离边界 ≥ 半屏可见格数」，
-        /// 而可走区铺到最外圈时玩家自己能走到离边界 1 格处 ⇒ 两侧数学互斥（旧实现注释原话）。
+        /// 而可走区铺到最外圈时玩家自己能走到离边界 1 格处 ⇒ 两侧数学互斥。
         /// </para>
         /// </summary>
         /// <param name="n">环宽（格，必须 &gt; 0；<c>&lt;= 0</c> ⇒ 返回 0 且不写任何格）。</param>
@@ -343,7 +338,7 @@ namespace CloverEngine
         // 批写：整图 / 矩形 / 直线 / 圆盘
         // ═════════════════════════════════════════════════════════════════════
         // ⛔ 这些方法只负责「遍历哪些格」，写什么由调用方在 write 里决定 ——
-        //    因此**越界格也会原样交给 write**（旧实现经 `Set` 写，越界时由 `Set` 自己拦 + 留痕）。
+        //    因此**越界格也会原样交给 write**（越界拦截 + 留痕是调用方 `write` 的职责）。
         //    引擎不在这里替调用方吞掉越界，否则「数据写到图外」这类缺陷会静默消失。
 
         /// <summary>整图逐格（<c>x</c> 升序外层、<c>y</c> 升序内层）。</summary>

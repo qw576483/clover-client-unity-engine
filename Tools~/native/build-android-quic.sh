@@ -70,7 +70,7 @@ NDK_MAKE_SRC="$NDK/prebuilt/windows-x86_64/bin/make.exe"
 # OpenSSL 的 Makefile 会用 $(MAKE) 递归调用自己（build_libs -> $(MAKE) depend 等），
 # 而 make 把 MAKE 变量设成"自己被调用时的路径"。NDK 的 make.exe 位于
 # "C:/Program Files/..."（带空格），recipe 里没有加引号，于是 sh 把 `C:/Program`
-# 当成命令 → "No such file or directory" / Error 127（本轮实测踩到）。
+# 当成命令 → "No such file or directory" / Error 127（实测）。
 # 复制成无空格路径后，子 make 的路径就不含空格了。DLL 依赖由 PATH 里的 NDK bin 提供。
 mkdir -p "$BUILD_ROOT/bin"
 NDK_MAKE="$BUILD_ROOT/bin/make.exe"
@@ -81,7 +81,7 @@ export ANDROID_NDK="$NDK"
 export PATH="$NDK_BIN:$NDK/prebuilt/windows-x86_64/bin:$GIT_USR:$PATH"
 
 # Windows 控制台默认 GBK，python 打印非 ASCII（如 ✓）会抛 UnicodeEncodeError 并返回非 0，
-# 从而把构建脚本的 `|| exit` 带崩（本轮踩过：补丁其实已写入，却被当成失败）。
+# 从而把构建脚本的 `|| exit` 带崩（补丁其实已写入，却被当成失败）。
 export PYTHONIOENCODING=utf-8
 
 echo "=== Android QUIC 交叉编译 ==="
@@ -110,7 +110,7 @@ if [ ! -f "$PERL_LIB_ROOT/usr/share/perl5/core_perl/Locale/Maketext/Simple.pm" ]
     tar -xf "$PERL_LIB_ROOT/perl.pkg.tar.zst" -C "$PERL_LIB_ROOT"
     rm -f "$PERL_LIB_ROOT/perl.pkg.tar.zst"
 fi
-# ⚠️ 两个必须遵守的约束（都踩过）：
+# ⚠️ 两个必须遵守的约束（都实测过）：
 #   1) 只给 `usr/share/perl5/*`（纯 Perl 模块），**绝不能**给 `usr/lib/perl5/core_perl`
 #      —— 那里是架构相关模块（含 Config.pm），版本钉死在 5.38，会让宿主 perl 报
 #      "Perl lib version (5.38.2) doesn't match executable 'perl' version (5.42.2)"。
@@ -127,7 +127,7 @@ cat > "$PERL_SHIM_DIR/perl" <<EOF
 # OpenSSL 的 Configure 会用 \$^X（真实 perl 路径）把它自己刚生成的 configdata.pm
 # 再执行一次，那次调用不经过本垫片 —— 只有环境变量能带过去（实测：只给 -I 时
 # 依然死在 "Can't locate Pod/Usage.pm at configdata.pm line 19802"）。
-# 这里用环境变量不会踩到之前 PERL5LIB 被改写的坑：垫片 -> perl 是 msys 内部跳转，
+# 这里用环境变量不受路径改写影响：垫片 -> perl 是 msys 内部跳转，
 # 不发生路径改写；被改写的只是「msys -> 原生 make.exe」那一跳，而这条路由垫片自己设置。
 # （注意：本 heredoc 未加引号，**注释里不能出现反引号**，否则会被 bash 当命令替换执行。）
 PERL5LIB="$PERL_LIB_ROOT/usr/share/perl5/core_perl:$PERL_LIB_ROOT/usr/share/perl5/vendor_perl\${PERL5LIB:+:\$PERL5LIB}"
@@ -142,7 +142,7 @@ export PATH="$PERL_SHIM_DIR:$PATH"   # 必须放在 PATH 前面，压过系统 p
 #   $(PERL) "-I." -Mconfigdata util/dofile.pl ... > include/openssl/asn1.h
 # 这类生成头文件的规则会**绕过 PATH 垫片**，再次缺模块。
 # PERL5OPT 对环境里"任何一个" perl 都生效；值以 `-I` 开头，不会被 msys 当路径改写
-# （之前 PERL5LIB 被改写是因为它的值以 `/` 开头）。
+# （以 `/` 开头的环境变量值会被 msys 改写）。
 export PERL5OPT="-I$PERL_LIB_ROOT/usr/share/perl5/core_perl -I$PERL_LIB_ROOT/usr/share/perl5/vendor_perl${PERL5OPT:+ $PERL5OPT}"
 perl -e 'require Locale::Maketext::Simple; require Params::Check; require Pod::Usage; require IPC::Cmd; print "  perl 模块自检 OK（经垫片）\n"' \
     || { echo "perl 模块补给失败（quictls Configure 会失败）" >&2; exit 6; }

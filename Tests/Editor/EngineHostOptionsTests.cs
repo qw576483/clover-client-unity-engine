@@ -15,12 +15,11 @@ namespace CloverEngine.Tests
     /// </para>
     /// <para>
     /// 本用例就是那条默认值的回归闸门：改默认值 ⇒ 立刻红。
-    /// （未实跑声明：本轮禁止启动 Unity，本文件只做静态审查。）
     /// </para>
     /// </summary>
     public class EngineHostOptionsTests
     {
-        /// <summary>不配置时，三个开关都必须是"别管我"（= 本次下沉前的行为）。</summary>
+        /// <summary>不配置时，三个开关都必须是"别管我"（null / false = 引擎不干预）。</summary>
         [Test]
         public void Defaults_AreAllLeaveAlone()
         {

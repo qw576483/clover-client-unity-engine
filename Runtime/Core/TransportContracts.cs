@@ -30,12 +30,6 @@ namespace CloverEngine
         /// 服务端 <c>gateway.listen_udp</c> 与裸 UDP 共享端口，按首字节 0x55 魔数分流。
         /// </summary>
         Quic = 3,
-
-        // 原 WebTransport = 4 已删除：客户端**从来没有**任何 WebTransport 实现
-        // （TransportPlanner.Create 走 default 抛 NotSupportedException、WebGL 一律判不可用），
-        // 唯一用途是 Describe() 里打印 "wt:"，属死枚举值——留着会让人以为「配了 wt 就能用」。
-        // 服务端确实有 WT 接入（internal/transport/net/wt），将来补客户端需先做浏览器侧 jslib 桥接，
-        // 届时再把它加回来（并让 Create/IsSupported 真正放行）。
     }
 
     /// <summary>

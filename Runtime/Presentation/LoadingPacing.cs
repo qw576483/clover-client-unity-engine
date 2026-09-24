@@ -2,12 +2,11 @@
 // CloverEngine · Runtime/Presentation/LoadingPacing.cs
 // 读条屏的**分档 / 节奏纯函数**：档 ↔ completeness、按时间放行到第几档、引擎进度 → 档号。
 //
-// 为什么要有它（下沉记录）：
-//   全工程只有业务侧 `clover-project-diablo2/client/Assets/Scripts/Module/Flow/LoadingSteps.cs`
-//   在做「N 档读条图，逐档绑一个真实里程碑；进度不能假（只能用真里程碑前移），但每档要有最短
-//   可见时间，让 10 帧动画真的看得见；引擎场景加载进度只占前几档」这件事。
-//   这三条都是**纯算术**（不问业务状态、不碰 Unity 对象），任何"分档读条 / 阶段进度门"都能用
-//   ⇒ 收进引擎；**档数、每档时长、哪一档对应哪个里程碑全留业务侧**（本件只吃参数）。
+// 边界：
+//   收在本件的是「N 档读条图，逐档绑一个真实里程碑；进度不能假（只能用真里程碑前移），但每档要有最短
+//   可见时间，让 10 帧动画真的看得见；引擎场景加载进度只占前几档」这三条**纯算术**
+//   （不问业务状态、不碰 Unity 对象）；
+//   **档数、每档时长、哪一档对应哪个里程碑全留业务侧**（本件只吃参数）。
 //
 // 口径（调用方要抄的）：
 //   ① **进度不许假**：档位只能由真里程碑前移 ⇒ 呈现档位 = `min(真实档位, 放行档位)`；
@@ -18,15 +17,11 @@
 //   ③ `SceneLoadFrameIndex` 里的 `engineCeiling = 0.9` 是引擎场景加载的回调上限
 //      （`Runtime/Presentation/Scene.cs` 的 `op.progress >= 0.9f` 门控）：`[0, 0.9]` 只映射到
 //      前 `progressShare`（默认 0.5 = 原版 `Show(0.5f)` 的位置）那段门 —— 否则"场景一加载完
-//      读条屏就到最后一帧"（这正是旧实现里修掉的缺陷）。
+//      读条屏就到最后一帧"。
 //   ④ 无状态 / 纯函数（可离线逐条断言）；本件不依赖任何项目类型。
-//   ⑤ ⚠️ 收敛点（本次**未**一并做）：项目侧 `Diablo2.UI.LoadingPanel.FrameIndex`
-//      （`client/Assets/Scripts/UI/LoadingPanel.cs`）是**同一条公式**的第 6 行副本 —— 它是 UI 控件
-//      自己的「[0,1] → 取第几帧」，本片不在改动范围（任务书只允许改三个文件）。
-//      本件 `FrameIndex` 与它逐行等价（`(int)((frameCount-1) * clamp01(c))` + 钳位），
-//      后续若要彻底收口，让 `LoadingPanel.FrameIndex` 转调本件即可（届时删掉那 6 行）。
+//   ⑤ ⚠️ 本公式须与任何自带同一口径的消费方保持同步（`(int)((frameCount-1) * clamp01(c))` + 钳位）。
 //
-// 用法（首个消费方 = `clover-project-diablo2/client/Assets/Scripts/Module/Flow/LoadingSteps.cs`）：
+// 用法：
 //   var c   = LoadingPacing.CompletenessOf(index, count);                  // 档号 → [0,1]
 //   var cap = LoadingPacing.MaxIndexAt(elapsedSeconds, cadenceSeconds, count);   // 按时间放行上限
 //   var idx = LoadingPacing.SceneLoadFrameIndex(progress, count, loadedFrame);   // 引擎进度 → 档号
@@ -54,7 +49,7 @@ namespace CloverEngine
 
         /// <summary>
         /// `[0,1]` 的 completeness → 档号（**钳位**，<paramref name="frameCount"/> ≤ 0 ⇒ 0）。
-        /// <para>公式 = `(int)((frameCount - 1) * clamp01(completeness))`（旧实现同款）。</para>
+        /// <para>公式 = `(int)((frameCount - 1) * clamp01(completeness))`。</para>
         /// </summary>
         public static int FrameIndex(float completeness, int frameCount)
         {

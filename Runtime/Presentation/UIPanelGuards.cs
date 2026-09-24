@@ -1,18 +1,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Presentation/UIPanelGuards.cs
 // 面板参数取值守卫：把「OnOpen(param) 的载荷缺失 / 类型不符 ⇒ 留痕 + 降级，⛔ 不抛异常」
-// 收敛成一处通用实现，项目侧只留一个 per-tag 薄转发。
+// 做成一处通用实现（项目侧只留一个 per-tag 取值转发）。
 //
-// 出处：Diablo2 项目 `client/Assets/Scripts/UI/UiLog.cs` 的 `Require<T>` / `RequireInt`
-//   —— 原语义逐条照搬（param == null ⇒ 留痕 + 返回 null / 兜底值；类型不符 ⇒ 留痕 + 返回 null / 兜底值；
-//   失败一律走「面板按空数据打开」的降级分支，不崩）。唯一差异：留痕从「每次裸 Warn」改为
-//   「同一 (tag, 面板, 原因) 只报一次」（见下面语义约束 ②，那是本件下沉时要治的刷屏）。
+// 语义：param == null ⇒ 留痕 + 返回 null / 兜底值；类型不符 ⇒ 留痕 + 返回 null / 兜底值；
+//   失败一律走「面板按空数据打开」的降级分支。留痕口径见下面语义约束 ②。
 //
-// 为什么下沉：`UIPanel.OnOpen(param)` 的契约是「param 在 `Awake` 之后才到」⇒ 缺参数不是崩溃，
-//   而是「打开方漏传 / 传错 DTO」的降级场景。每个项目都会把这套「判空 + 打日志 + 走降级」的
-//   样板各写一遍，而**降级口径**（返回什么 / 要不要限频）与**日志口径**（tag 怎么写）各写各的
-//   ⇒ 新项目必再踩一次（样板里最容易漏的两条：① 漏判类型 ⇒ 强转抛异常；② 裸 Warn ⇒ 面板重开刷屏）。
-//   收敛到引擎后项目侧只剩一行转发，口径由引擎保证（同 `LogThrottle` 的 D 桶判定）。
+// 为什么要有本件：`UIPanel.OnOpen(param)` 的契约是「param 在 `Awake` 之后才到」⇒ 缺参数不是崩溃，
+//   而是「打开方漏传 / 传错 DTO」的降级场景 —— 样板里最容易漏的两条：
+//   ① 漏判类型 ⇒ 强转抛异常；② 裸 Warn ⇒ 面板重开刷屏。
+//   本件把**降级口径**（返回什么 / 要不要限频）与**日志口径**（tag 怎么写）统一。
 //
 // 语义约束（改一条 = 语义漂移）：
 //   ① **永不抛异常**：载荷缺失 / 类型不符 / `panelName` 为空，一律只走降级分支。
@@ -22,16 +19,14 @@
 //      项目 tag 白名单（合法 tag 集是每个项目自己的约定，见 `LogThrottle.cs:9-11` 的同口径说明）。
 //   ④ 两档语义分开：`TryGet<T>` = **纯探测**（不产生任何日志，供「有则用、无则走默认」的场景）；
 //      `Require<T>` / `RequireValue<T>` = 探测 + 留痕 + 失败返回安全值（`default` / 调用方给的兜底值）。
-//   ⑤ 泛型**不加 `class` 约束**：值类型载荷（如 `int skillId`）同样走本件，不必各项目再写一个
-//      `RequireInt` 的平行实现（§4.4 复用规则第 4 条：已有能力不够用时优先扩展原实现）。
+//   ⑤ 泛型**不加 `class` 约束**：值类型载荷（如 `int skillId`）同样走本件，不必再写一个
+//      只取值类型的平行实现（`结构规则.md` §4.4 复用规则第 4 条）。
 //
-// 用法 + 首个消费方：
+// 用法：
 //   面板侧（一次性）——`Require` 拿引用型载荷，缺失时返回 `null` 让面板走空数据分支：
 //     if (!UIPanelGuards.Require(param, nameof(XxxPanel), out XxxArgs args)) args = XxxArgs.Empty;
 //   值类型载荷（缺失时用兜底值）：
 //     var skillId = UIPanelGuards.RequireValue(param, nameof(XxxPanel), fallback: 0);
-//   首个消费方 = Diablo2 的薄转发 `clover-project-diablo2/client/Assets/Scripts/UI/UiLog.cs`
-//     （`UiLog.Require<T>` / `UiLog.RequireInt` 转发到本件，调用点零改动）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace CloverEngine

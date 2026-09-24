@@ -2,21 +2,18 @@
 // CloverEngine · Runtime/Presentation/SortingLayers.cs
 // 2D `sortingOrder` 的**层级预算表 + 深度序 + 同序确定性次级键**（纯逻辑，不持有任何 Unity 对象）。
 //
-// 来源（公式与取值逐字搬移；层数 / 预算已参数化）：
-//   clover-project-cr · client/Assets/Scripts/View/UnitView.cs
-//     · :395-405 `Apply()` 里的深度序：
-//         `sortingOrder = SortingOrder.Unit + Mathf.RoundToInt((ArenaTilesH * 0.5f - worldPos.y) * 16f)`
-//         （口径：俯视视角下"越靠近屏幕下方（y 越小）越靠前"；取 **16 级/格**，
-//           旧值 2 级/格 会让相距半格的两个单位拿到同一个 order ⇒ 谁盖谁由渲染器枚举顺序决定）
-//     · :848-884 `SortingOrder` 静态类 = **层级预算表**
-//         （底图 0 / 装饰 10 / 塔 50 / 落点指示 200 / 单位 1000±深度 / 血条 2000 / 特效 3000）
-//     · :541-580 `DepthTiebreak(int id)` + `DepthTiebreakStep = 1e-4f` + `DepthTiebreakMod = 256`
-//         （同 `sortingOrder` 下的**确定性次级键**：一个只由实体 id 决定的微小 z 偏移）
+// 口径（层数 / 预算已参数化）：
+//   · 深度序：`sortingOrder = 单位层 + RoundToInt((半场高 - worldPos.y) * 16f)`
+//     （俯视视角下"越靠近屏幕下方（y 越小）越靠前"；取 **16 级/格**，级数太粗会让
+//       相距半格的两个单位拿到同一个 order ⇒ 谁盖谁由渲染器枚举顺序决定）
+//   · **层级预算表**：底图 0 / 装饰 10 / 塔 50 / 落点指示 200 / 单位 1000±深度 / 血条 2000 / 特效 3000
+//   · **确定性次级键**（`DepthTiebreak(id)`，步长 `1e-4f` × 取模 256）：
+//       同 `sortingOrder` 下的一个只由实体 id 决定的微小 z 偏移
 //
-// 为什么沉：
+// ★ 通用性依据：
 //   「层级预算 + 深度序 + 同序次级键」是所有俯视 2D 项目的通用问题：底图、装饰、建筑、指示器、角色、
-//   血条、特效各占一段 `sortingOrder`，而角色这段还要按世界 y 细分。原项目把它们散在 `UnitView`
-//   与它的嵌套静态类里，别的项目要照抄一遍（连同"忘了留预算"的坑）。
+//   血条、特效各占一段 `sortingOrder`，而角色这段还要按世界 y 细分。这些取值若散落在使用方里，
+//   每个使用方都要照抄一遍（连同"忘了留预算"的问题）。
 //
 // ★ 依据（同序为什么必须有确定性次级键；出自 Unity 官方手册「2D 渲染顺序」）：
 //   排序层 → 层内顺序 → 渲染队列 → **距离** → 排序组 → 材质。其中「距离」条目明写：
@@ -26,7 +23,7 @@
 //   `https://docs.unity3d.org.cn/Manual/sprite/sort-sprites/sort-sprites.html`
 //   ⇒ 位置**完全重合**的单位（一次 6 只落在同一格）必然拿到同一个 `sortingOrder`，
 //     谁盖谁就回到"枚举顺序"⇒**每帧可能不同** ⇒ 两张不同动画帧的贴图在同像素上互相翻盖
-//     （原项目实测：`frame=5907 pos=(-5.5,2.5) n=3 order=[1216,1216,1216]`，三只同格）。
+//     （实测：`frame=5907 pos=(-5.5,2.5) n=3 order=[1216,1216,1216]`，三只同格）。
 //     所以必须有**确定性的次级键** —— 用 z（正交相机下 z 不改投影位置，只决定先后），
 //     且只由 id 决定（**逐帧稳定**；任何随时间变化的量都会让次序来回翻，等于没修）。
 //
@@ -34,7 +31,7 @@
 //   `sortingOrder` 是 int，再细分就会撞穿层级预算（角色层上界要 **< 血条层**）。
 //   z 是**同一 `sortingOrder` 内**的次级排序键，不占 int 预算。
 //
-// 已知事故 / 坑：
+// 注意：
 //   · 层级预算**必须逐段检查**（本件 <see cref="ValidateBudget"/>）：角色层的最大 order 一旦 ≥ 血条层，
 //     症状是"血条被自己单位的精灵盖住"（很显眼但很难猜是层级算错）；也可能是"站在建筑前面的兵被建筑盖住"。
 //   · 深度序的**方向**不能反：`(半场高 − y)` 随 y 减小而增大（越靠屏幕下方 = order 越大 = 后画 = 在前）。
@@ -67,7 +64,7 @@ namespace CloverEngine
         /// <summary>日志标签。</summary>
         public const string Tag = "SortingLayers";
 
-        /// <summary>默认深度分辨率（级/格）。原项目取 16（1 级 ≈ 1/16 格，已细于任何两个实体的最小可见纵深差）。</summary>
+        /// <summary>默认深度分辨率（级/格）。取 16（1 级 ≈ 1/16 格，已细于任何两个实体的最小可见纵深差）。</summary>
         public const int DefaultDepthLevelsPerTile = 16;
 
         /// <summary>默认次级键取模基数（决定可区分的同格堆叠上限 = 该值，默认 256 只）。</summary>
@@ -76,7 +73,7 @@ namespace CloverEngine
         /// <summary>默认次级键步长（格）；× <see cref="DefaultTiebreakMod"/> 必须小于 1 个 order 级。</summary>
         public const float DefaultTiebreakStep = 1e-4f;
 
-        // ── 层级预算表（⛔ 每项都可覆盖；默认值 = 通用分层，与原项目 SortingOrder 取值一致） ──
+        // ── 层级预算表（⛔ 每项都可覆盖；默认值 = 通用分层） ──
 
         /// <summary>地面 / 底图层。</summary>
         public int Ground { get; set; } = 0;

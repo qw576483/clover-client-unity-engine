@@ -455,8 +455,8 @@ namespace CloverEngine
         internal NetworkManager(GameConfig configOverride)
         {
             var cfg = configOverride ?? Game.Config;
-            // 兜底值一律取自 GameConfig 的默认常量：**值只在那一处定义**（原先这里又抄了一份同样的
-            // 字面量，两处各改一半就会出现「配置缺省时到底用哪套默认值」的静默分歧）。
+            // 兜底值一律取自 GameConfig 的默认常量：**值只在那一处定义**（两处各抄一份字面量时，
+            // 只改一半就会出现「配置缺省时到底用哪套默认值」的静默分歧）。
             _callTimeoutSeconds = cfg != null && cfg.CallTimeoutSeconds > 0 ? cfg.CallTimeoutSeconds : GameConfig.DefaultCallTimeoutSeconds;
             _maxReconnectCount = cfg != null && cfg.MaxReconnectCount > 0 ? cfg.MaxReconnectCount : GameConfig.DefaultMaxReconnectCount;
             _udpKeepaliveIntervalMs = (long)(cfg != null && cfg.UdpKeepaliveIntervalSeconds > 0 ? cfg.UdpKeepaliveIntervalSeconds : GameConfig.DefaultUdpKeepaliveIntervalSeconds) * 1000;
@@ -512,8 +512,7 @@ namespace CloverEngine
             if (TransportCapabilities.IsSupported(TransportKind.Quic))
                 return udpAddr;
 
-            // 配了 UDP 端点却没排 QUIC ⇒ 必须让"为什么"可见（否则就是静默降级）：
-            // 之前真机包就是这样只剩 TCP 且全包无一条 QUIC 日志，查起来靠猜。
+            // 配了 UDP 端点却没排 QUIC ⇒ 必须让"为什么"可见（否则就是静默降级）。
             if (!_quicExclusionLogged)
             {
                 _quicExclusionLogged = true;
@@ -838,7 +837,7 @@ namespace CloverEngine
             //    服务端裸 UDP 的 conn 有**独立 connID**（`internal/transport/net/udp/client.go:28`
             //    的 session.NewConnID()），所以裸 UDP 帧落在一个**没有会话 crypto** 的会话上 ——
             //    网关 `gwcore/session.go:494` 的 forwardFrame 取不到 crypto，直接按明文解帧
-            //    （`proto.DecodeClientFrame`）。客户端若先加密（本方法旧行为），服务端读到的
+            //    （`proto.DecodeClientFrame`）。客户端若先加密，服务端读到的
             //    requestID/msgID 其实是密文（nonce 前 8 字节），解不出合法帧 → 不可靠上行静默全丢。
             //    这与 `SendUdpBindFrame` 是同一条口径（那一帧同样刻意不加密）。
             // ② / ③ 用的是**同一条会话**（QUIC Datagram / 可靠线路），服务端凭该会话的 crypto

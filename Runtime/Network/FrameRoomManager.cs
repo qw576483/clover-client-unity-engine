@@ -17,7 +17,7 @@ namespace CloverEngine
     ///   - 订阅回调处理帧数据（OnFrame）
     ///
     /// <para>
-    /// 【未接线】引擎内部（Runtime/Editor/Tests）当前无调用方：本类为业务侧入口
+    /// 【调用面】引擎内部（Runtime/Editor/Tests）当前无调用方：本类为业务侧入口
     /// （SetReadyAsync / SnapshotAsync / RecoveryAsync / TakeoverRecoveryAsync 等 C2S 方法
     /// 注册就绪但引擎内从不触发）——调用与否由业务决定，不要按「无人使用」删除。
     /// </para>

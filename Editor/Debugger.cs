@@ -119,9 +119,7 @@ namespace CloverEngine.Editor
         /// （<c>CloverLan.Describe</c>）。
         ///
         /// <para>
-        /// **为什么接进面板**：这两段描述过去只写进日志（且 <c>TransportCapabilities.Describe</c> 曾无调用点），
-        /// 于是「为什么这条线路没被用 / 这台机器能不能走 QUIC / 本机能不能寻服」只能翻日志才看得到。
-        /// 面板上直接给出来，能省掉一轮"猜测 → 翻日志"。
+        /// **为什么接进面板**：面板上直接给出来，能省掉一轮"猜测 → 翻日志"。
         /// </para>
         /// </summary>
         private static void DrawCapabilitySection()
@@ -187,8 +185,7 @@ namespace CloverEngine.Editor
     {
         /// <summary>
         /// 命令表：比较规则**大小写不敏感**（Ordinal 序，不受 Turkish-I 之类区域设置影响）。
-        /// Register 存键与 Execute 查表必须用同一套规则 —— 旧实现 Register 原样存、Execute 用
-        /// <c>ToLower()</c> 查（还受当前区域设置影响），任何含大写字母的注册名都查不到。
+        /// Register 存键与 Execute 查表必须用同一套规则。
         /// </summary>
         private static readonly Dictionary<string, Action<string[]>> _commands =
             new(StringComparer.OrdinalIgnoreCase);
@@ -319,8 +316,7 @@ namespace CloverEngine.Editor
     /// <summary>
     /// GM 控制台窗口：提供一个输入框，把命令字符串交给 <see cref="GMCommand.Execute"/>。
     ///
-    /// **存在的必要性**：<c>GMCommand</c> 原先只有 <c>Register</c> / <c>Execute</c> 两个公开方法，
-    /// 却**没有任何调用方**——命令注册了却无处执行（典型的「未接线」）。本窗口就是它的入口。
+    /// 本窗口是 <c>GMCommand</c> 的执行入口：命令注册后在这里输入并执行。
     ///
     /// 用法：进入 Play 模式后从菜单 <c>Clover/GM 控制台</c> 打开，输入 <c>help</c> 查看内置命令。
     /// </summary>
@@ -396,7 +392,7 @@ namespace CloverEngine.Editor
     /// 运行时调试面板的挂载器：把 <see cref="DebuggerWindow"/>（FPS / FSM / 网络状态 / RTT）
     /// 装到一个常驻 GameObject 上，并驱动它的 <c>Update</c> 与 <c>OnGUI</c>。
     ///
-    /// **存在的必要性**：<c>DebuggerWindow</c> 原先也没有任何挂载点——它的 OnGUI/Update 永远不会被调用。
+    /// 本挂载器负责驱动 <c>DebuggerWindow</c> 的 OnGUI/Update。
     /// 由于本程序集仅在 Editor 平台编译（asmdef includePlatforms=Editor），此挂载器只在 Editor 的
     /// Play 模式下可用——这正是调试面板需要的场景（打包后的正式包不带它）。
     ///

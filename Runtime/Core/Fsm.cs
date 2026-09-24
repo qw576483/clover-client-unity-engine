@@ -6,8 +6,7 @@ namespace CloverEngine
     /// <summary>
     /// 有限状态机接口，定义状态注册、转换和更新的基本操作。
     /// <para>
-    /// <b>转换语义（实现契约）</b>：目标状态与当前状态相同时一律忽略（不重跑 OnExit/OnEnter，
-    /// 旧实现只给 <c>Transition</c> 加了守卫，<c>Trigger</c>/<c>Force</c> 连自环都会重跑）；
+    /// <b>转换语义（实现契约）</b>：目标状态与当前状态相同时一律忽略（不重跑 OnExit/OnEnter）；
     /// 状态回调（OnExit/OnEnter/OnTick/OnChange）内再发起转换会被收进队列，
     /// 等当前转换收尾后**按序补执行**（不会以旧状态重入、也不会丢意图）。
     /// </para>
@@ -34,7 +33,7 @@ namespace CloverEngine
         /// <param name="toState">目标状态名称。</param>
         void AddTransition(string trigger, string toState);
         /// <summary>
-        /// 通过触发器名称执行状态转换。触发器未注册时**告警**并忽略（旧实现静默 return，拼错触发器名表现为"按了没反应"）。
+        /// 通过触发器名称执行状态转换。触发器未注册时**告警**并忽略。
         /// </summary>
         /// <param name="trigger">触发器名称，需预先通过 AddTransition 注册。</param>
         void Trigger(string trigger);
@@ -85,10 +84,9 @@ namespace CloverEngine
     /// 业务要用状态机描述"每个 Bot / 每个单位各自一棵"的局部流程时，若把状态注册到那一份上，
     /// 多个实体就会<b>共用同一个 <see cref="Current"/></b>、互相覆盖（同名状态重复注册还会
     /// 触发"存活期回调被整体替换"的告警）⇒ 结构上不成立。
-    /// 提升前跨程序集不可实例化，业务只能<b>逐字复刻</b>本类实现
-    /// （实例：clover-project-cs16 的 <c>Module/Bot/CsBotFsm.cs</c> 整份复制了本文件的
-    /// 自环守卫 / 回调内再转换排队 / 连锁上限 8 / 异常隔离）—— 那正是本类被提升为 public 的原因：
-    /// 语义只有一份实现，业务直接用 <c>Game.NewFsm()</c> 拿自己那份实例，⛔ 不再抄一遍。
+    /// 语义只有一份实现：业务直接用 <c>Game.NewFsm()</c> 拿自己那份实例，⛔ 不要自己再抄一份
+    /// （自环守卫 / 回调内再转换排队 / 连锁上限 8 / 异常隔离都必须走本类）。
+    /// 本类由 <c>internal</c> 提升为 <c>public</c> 就是为了让跨程序集也能实例化。
     /// </para>
     /// <para>
     /// 与 <see cref="Game.Fsm"/> 的关系：<b>完全独立</b> —— 新实例有自己的
@@ -101,8 +99,7 @@ namespace CloverEngine
     {
         /// <summary>
         /// 一次外部转换调用允许的连锁转换上限：状态回调里再发起转换会被排队补执行，
-        /// 若回调链反复自激（如 OnExit 每次都重触发同一路径）则到上限后报错停止 ——
-        /// 旧实现无守卫无上限，这种形态直接递归到栈溢出。
+        /// 若回调链反复自激（如 OnExit 每次都重触发同一路径）则到上限后报错停止。
         /// </summary>
         private const int MaxChainedSwitches = 8;
 
@@ -138,7 +135,7 @@ namespace CloverEngine
         {
             if (_states.ContainsKey(state))
             {
-                // 覆盖不留痕的旧行为：运行中重复注册会静默丢掉前一组回调，排障时无从发现。
+                // 静默覆盖会丢掉前一组回调且不留痕，排障时无从发现 ⇒ 必须告警。
                 Game.Logger?.Warn("Fsm",
                     $"state '{state}' re-registered: previous OnEnter/OnTick/OnExit are replaced");
             }
@@ -172,7 +169,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 通过触发器名称执行状态转换，若触发器已注册则切换状态。
-        /// <para>触发器未注册时<b>告警</b>并忽略：旧实现静默 return，业务把触发器名拼错时的表现是"按了没反应"，无从定位。</para>
+        /// <para>触发器未注册时<b>告警</b>并忽略（含已注册触发器名列表），便于定位拼写错误。</para>
         /// </summary>
         /// <param name="trigger">触发器名称。</param>
         public void Trigger(string trigger)
@@ -258,8 +255,6 @@ namespace CloverEngine
         /// <b>不清什么</b>：<see cref="OnChange"/> 的订阅表（<c>_changeHandlers</c>）—— 订阅是"调用方与实例
         /// 之间"的关系，不是状态机内容；静默解绑会让"重置后通知不再到达"变成无从定位的现象
         /// （表现是"重置一次以后 OnChange 就再也不触发了"）。要解绑请显式 <see cref="OffChange"/>。
-        /// 出处：clover-project-cs16 的 <c>Module/Bot/CsBotFsm.cs</c> 的 <c>Reset()</c> 同口径
-        /// （它清 <c>_states/_transitions/_current/_switching/_hasPending/_pendingState</c>，保留订阅表）。
         /// </para>
         /// <para>
         /// <b>为什么不销毁实例</b>：实例常被对象池 / 每回合复用，销毁重建会让外部持有的引用（订阅、
@@ -286,11 +281,10 @@ namespace CloverEngine
         /// <summary>
         /// 执行状态转换（Transition / Trigger / Force 与链式补执行的唯一入口）。
         /// <list type="bullet">
-        /// <item><b>自转换守卫</b>：目标与当前相同直接忽略 —— 旧实现只有 Transition 有守卫，
-        /// Trigger/Force 遇自环（<c>Game.InitFsm</c> 注册的 Disconnected→Disconnected）会重跑
-        /// OnExit+OnEnter，回调内再触发即成死循环。</item>
+        /// <item><b>自转换守卫</b>：目标与当前相同直接忽略（Transition / Trigger / Force 一致，
+        /// 避免自环重跑 OnExit+OnEnter、回调内再触发即成死循环）。</item>
         /// <item><b>重入保护</b>：转换执行中状态回调再次发起转换时只把目标排队（取最后一次），
-        /// 当前转换收尾后按序补执行 —— 旧实现以旧状态重入：OnExit 执行两次、内层新状态被外层覆盖。</item>
+        /// 当前转换收尾后按序补执行（不以旧状态重入）。</item>
         /// </list>
         /// </summary>
         private void SwitchTo(string toState)

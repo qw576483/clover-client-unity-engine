@@ -1,22 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/GridUtil.cs
-// 矩形 → 整数格遍历（纯函数 / 无状态 / 不持有任何 Unity 对象）—— 通用底座，下沉到引擎。
+// 矩形 → 整数格遍历（纯函数 / 无状态 / 不持有任何 Unity 对象）—— 通用底座。
 //
-// 出处：**从项目重复实现收敛而来**，依据 4 个调用点（clover-project-super-mario，
-//   client/Assets/Scripts/ 下），四份**逐字相同**：
-//     · Module/Player/PlayerActor.cs:1043-1060      Overlap(Rect)      —— 玩家碰撞盒
-//     · Module/Entities/EnemyModule.cs:286-303      EnemyGrid.Overlap  —— 敌人共用
-//       （该处注释已写明代价："原先它是 Goomba 的私有方法，新增乌龟时复制一份就会出现两套边界处理"）
-//     · Module/Entities/ItemModule.cs:355-365       Item.Overlap       —— 道具
-//     · Module/Entities/FireballModule.cs:248-257   Overlap(Rect)      —— 火球
-//   四份口径完全相同：`xMin = FloorToInt(r.xMin)`、`xMax = FloorToInt(r.xMax - 0.0001f)`，
-//   y 外层 / x 内层、**升序**，逐格 yield Vector2Int。
-//   ⇒ 本类逐字复刻该口径（连 `- 0.0001f` 的减位都保留）：那 4 处 `foreach (var c in Overlap(r))`
-//     可直接换成 `GridUtil.ForEach(r, 已缓存的委托)`。
+// 口径（`- 0.0001f` 的减位即契约）：`xMin = FloorToInt(r.xMin)`、`xMax = FloorToInt(r.xMax - 0.0001f)`，
+//   y 外层 / x 内层、**升序**，逐格回调 Vector2Int。
+//   ⇒ 任何 `foreach (var c in Overlap(r))` 形态都可换成 `GridUtil.ForEach(r, 已缓存的委托)`。
 //
 // ★ 为什么是 FloorToInt（而不是 RoundToInt / `(int)` 强转）：
 //   · `(int)` 强转对**负数向零截断**（x = -0.5 ⇒ 0）⇒ 坑左侧那半格被算进第 0 格，
-//     表现为「站在坑里也能踩到地」，而且**不报错**（PlayerActor.cs:1045 原文同款提醒）；
+//     表现为「站在坑里也能踩到地」，而且**不报错**；
 //   · RoundToInt 会把 x = 0.6 算成第 1 格 ⇒ 格边界被挪到 0.5，与引擎既有格子口径
 //     「格 (gx, gy) 覆盖 [gx, gx+1] × [gy, gy+1]」（Runtime/Core/IsoLayout.cs:13-15）不符，
 //     还会让"贴边站"取决于小数位（同一格内走一步就换格）。
@@ -32,7 +24,7 @@
 //   世界更大时**显式传更大的 epsilon**（本类每个入口都带 epsilon 参数），否则等于没减。
 //
 // ★ GC：`ForEach` 是热路径入口（每帧、每个碰撞盒都要跑），所以用**回调**而不是迭代器 ——
-//   迭代器每次 foreach 都要分配（状态机 + 装箱的枚举器）。但回调自己也有坑：
+//   迭代器每次 foreach 都要分配（状态机 + 装箱的枚举器）。但回调自己也有代价：
 //   `ForEach(r, (x, y) => {...})` 的 lambda 一旦捕获局部变量，就**每次调用分配一个闭包**；
 //   方法组写法 `ForEach(r, OnTile)` 在 Unity 的 C# 9 下**每次转换也分配一个委托**。
 //   ⇒ 热路径请把委托**存进字段**（`_onTile ??= OnTile;`）再传进来；`Enumerate` 只给冷路径用，
@@ -48,7 +40,7 @@ namespace CloverEngine
     /// <summary>
     /// 矩形 → 整数格遍历（纯函数、无状态）。
     /// <para>
-    /// 契约（逐字复刻 4 个调用点，见文件头）：
+    /// 契约（见文件头）：
     /// ① 覆盖的格 = 矩形 [xMin,xMax] × [yMin,yMax] 与格 [g, g+1) 有**非零面积**交叠的那些格；
     /// ② 迭代顺序 = y 升序外层、x 升序内层（顺序是契约的一部分：调用方在回调里 <c>break</c> 时，
     ///    换顺序会让"先撞到哪一格"变化）；
@@ -62,7 +54,7 @@ namespace CloverEngine
         private const string Tag = "GridUtil";
 
         /// <summary>
-        /// 右/上边的默认收边量（= 4 个调用点里的 <c>0.0001f</c>，逐字保留）。
+        /// 右/上边的默认收边量（= 4 个调用点里的 <c>0.0001f</c>）。
         /// 语义与适用上限见文件头 ★；传 <c>0</c> = 含边界格（闭区间）。
         /// </summary>
         public const float EdgeEpsilon = 0.0001f;

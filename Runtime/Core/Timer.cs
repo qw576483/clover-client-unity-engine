@@ -123,8 +123,8 @@ namespace CloverEngine
         /// <summary>
         /// 待移除的定时器 id（标记式停止 + 延迟清理）。
         /// <para>
-        /// 用 <see cref="HashSet{T}"/> 而非 List：旧实现用 <c>List.Contains</c> 线性扫描，
-        /// 每帧 O(条目数 × 待移除数)；停止判定是热路径，必须 O(1)。
+        /// 用 <see cref="HashSet{T}"/> 而非 List：停止判定是热路径，
+        /// <c>List.Contains</c> 是每帧 O(条目数 × 待移除数) 的线性扫描，必须 O(1)。
         /// </para>
         /// <para>
         /// 为什么是"标记"而不是就地 <c>RemoveAt</c>：<see cref="Tick"/> 用倒序索引遍历，
@@ -220,18 +220,16 @@ namespace CloverEngine
         /// 停止指定ID的定时器。id 不存在时静默忽略（"停一个已触发完成的定时器"是常见正常路径）。
         /// <para>
         /// 停止是**即时生效**的：条目被标记后，本帧 <see cref="Tick"/> 的遍历轮到它时会直接跳过并移除；
-        /// 若在回调内调用，即使目标的遍历下标位于当前回调之后（更小索引）也不会再触发 ——
-        /// 旧实现把 id 记到下一帧才处理，回调内停掉的定时器本帧仍会被触发一次。
+        /// 若在回调内调用，即使目标的遍历下标位于当前回调之后（更小索引）也不会再触发。
         /// </para>
         /// </summary>
         /// <param name="id">定时器标识符</param>
         public void Stop(long id)
         {
             // 0 / 负数 = 「无效 / 未持有」哨兵，绝不能进墓碑集合。
-            // SceneModule 用 0 初始化 _progressTimerId 且无条件 Stop(它)，
-            // 而旧实现 id 从 0 起发 ⇒ Stop(0) 把 0 写进墓碑，紧接着新建的进度轮询 timer 正好拿到 id 0
-            // ⇒ 它在第一次 Tick 就被墓碑移除、一次都没轮询 ⇒ progress 停在 0.9、allowSceneActivation
-            // 永不置 true ⇒ 场景永不激活 ⇒ 全新 Play 会话第一次 Game.Scene.Load 必死（表现为黑屏）。
+            // 若 id 从 0 起发：SceneModule 用 0 初始化 _progressTimerId 且无条件 Stop(它) ⇒ 0 被写进墓碑，
+            // 紧接着新建的进度轮询 timer 正好拿到 id 0 ⇒ 第一次 Tick 就被移除、一次都没轮询 ⇒
+            // progress 停在 0.9、allowSceneActivation 永不置 true ⇒ 场景永不激活（表现为黑屏）。
             if (id <= 0) return;
             _toRemove.Add(id);
         }
@@ -366,8 +364,8 @@ namespace CloverEngine
         /// <summary>
         /// 从命名/作用域索引里摘掉该条目的 id（条目被移除时必调）。
         /// <para>
-        /// 旧实现只在 StopNamed/StopScope 时清字典：一次性命名/作用域定时器触发（自然完成）后
-        /// 对应 id 永久滞留 —— 反复用不同 name/scope 会让字典无限增长。
+        /// 只在 StopNamed/StopScope 时清字典是不够的：一次性命名/作用域定时器触发（自然完成）后
+        /// 对应 id 会永久滞留 —— 反复用不同 name/scope 会让字典无限增长。
         /// </para>
         /// </summary>
         private void Unregister(TimerEntry e)
@@ -388,7 +386,7 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 校验循环定时器的 interval。<c>&lt;= 0</c>（含 NaN）非法：旧实现会把它当一次性定时器
+        /// 校验循环定时器的 interval。<c>&lt;= 0</c>（含 NaN）非法：它会退化成一次性定时器
         /// 触发一次即删，与"循环执行"的承诺相反且无任何日志。
         /// 这里**拒绝创建并告警**，不静默改语义；调用方拿到 -1 即"没建"（多半是参数写错）。
         /// </summary>
@@ -396,7 +394,7 @@ namespace CloverEngine
         {
             if (interval > 0f) return true;
             Game.Logger?.Warn("Timer",
-                $"{api}(interval={interval}) 非法：循环间隔必须 > 0（旧行为是静默退化成一次性定时器，已改为拒绝创建）。");
+                $"{api}(interval={interval}) 非法：循环间隔必须 > 0，拒绝创建定时器。");
             return false;
         }
 

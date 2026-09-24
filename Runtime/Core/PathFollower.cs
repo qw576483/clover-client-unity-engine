@@ -1,32 +1,23 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/PathFollower.cs
-// 沿 A* 结果**逐格推进**的路径跟随器 + 朝向 —— 格子 / 等距类玩法的通用底座，下沉到引擎。
+// 沿 A* 结果**逐格推进**的路径跟随器 + 朝向 —— 格子 / 等距类玩法的通用底座。
 //
-// 出处：Diablo2 项目 `client/Assets/Scripts/Module/Monster/MonsterRuntime.cs:181-286`
-//   （`SetPath` / `ClearPath` / `HasRemainingPath` / `Advance` / `StepToward` / `UpdateDir`
-//    **语义逐行照搬**）。三处改写，行为一字未变：
-//     ① 命名空间 `Diablo2.Module.Monster` ⇒ `CloverEngine`；
-//     ② 原来读项目常量 `MonsterTuning.MinMoveSpeed` / `MonsterTuning.RepathIntervalSeconds`
-//        ⇒ 改成**构造参数**（引擎不预设任何业务数值，与 `IsoLayout` 的四个值同口径）；
-//     ③ 方向出口 `Iso.DirectionTo`（项目门面）⇒ **注入的** `IsoLayout.DirectionTo`（引擎同源实现）。
+// 速度 / 重规划间隔由**构造参数**传入（引擎不预设任何业务数值，与 `IsoLayout` 的半格尺寸同口径）；
+//   方向判定走**注入的** `IsoLayout.DirectionTo`。
 //
-// 为什么下沉（`结构规则.md` §4.4 复用规则）：`Advance` / `StepToward` 是**题材无关**的
-//   （"沿逐格路径走 + 按格变化更新朝向"），谁寻路都需要一段同语义的跟随器；
-//   业务侧各抄一份就是"平行再起一套"（实例：项目 `PlayerMotor` 已自带一份近似实现）。
-//   ⇒ 下沉后业务侧只剩薄转发 / 注入，数值与手感仍全部由调用方给。
+// 适用面：`Advance` / `StepToward` 是**题材无关**的（"沿逐格路径走 + 按格变化更新朝向"），
+//   任何寻路都需要一段同语义的跟随器；数值与手感全部由调用方给。
 //
 // 与 `AStar` 的分工：`AStar.Find` 产出**逐格路径**（`List<Vector2Int>`，含起点与终点），
 //   本件只**沿路走** —— ⛔ 本件不寻路、不查可走性、不认识任何地图类型（可走性判定在
 //   `AStar` 的 `walkable` 回调里，或调用方自行判定）。
 //
 // 为什么注入 `IsoLayout` 而不是自己写一张方向表：`IsoLayout.DirectionTo` 是**朝向的唯一真相**
-//   （它那张表曾被整档逆时针偏 45°、在引擎里修过一次，见 `IsoLayout.cs` 头）——
-//   复制第二份必然再次漂移，且漂移**不报错**（只表现为"朝向看着别扭"）。
+//   —— 复制第二份必然漂移，且漂移**不报错**（只表现为"朝向看着别扭"）。
 //   ⛔ `IsoLayout` 只在这里提供方向判定：本件**不碰** `HalfW` / `HalfH`
 //   （半格尺寸是项目语义，谁渲染谁决定；本件只处理**格坐标**与格中心）。
 //
-// 用法（首个消费方 = clover-project-diablo2 的 `Module/Monster/MonsterRuntime.cs`
-//   —— 该文件已退化为本件的**薄转发**）：
+// 用法：
 //   <code>
 //   var f = new PathFollower(layout, minMoveSpeed, repathIntervalSeconds);
 //   f.SnapTo(grid);                       // 落格（进图 / 刷怪 / 复活）
@@ -35,7 +26,7 @@
 //   f.StepToward(targetPos, speed, dt);   // 逃跑 / 紧急脱身：**直线**走一步，不做寻路
 //   </code>
 //
-// 边界（逐条与项目原实现对齐）：
+// 边界：
 //   · 坐标口径 = **格中心制**：格 (gx,gy) 的中心是 (gx+0.5, gy+0.5)，`Pos` 允许落在两格之间。
 //   · `Grid` 必须 `FloorToInt`（⛔ 不用 `(int)` 强转：负数向零截断会让格错半格且不报错）。
 //   · `SetPath(null)` / 路径 ≤ 1 点 ⇒ 判为"无路径"（与 `AStar.Find` 起点==终点返回单元素列表对齐）。
@@ -64,13 +55,11 @@ namespace CloverEngine
 
         /// <summary>
         /// 速度下限（格 / 秒）：<see cref="Advance"/> / <see cref="StepToward"/> 的入参低于它时按它处理。
-        /// <para>出处：Diablo2 的 `MonsterTuning.MinMoveSpeed`（该值本身有独立登记，见项目验收表）。</para>
         /// </summary>
         public float MinMoveSpeed { get; }
 
         /// <summary>
         /// 每次 <see cref="SetPath"/> 后写入 <see cref="RepathTimer"/> 的冷却秒数。
-        /// <para>出处：Diablo2 的 `MonsterTuning.RepathIntervalSeconds`（= 官方 `MonStats.aidel` ÷ 25fps）。</para>
         /// </summary>
         public float RepathIntervalSeconds { get; }
 
@@ -162,7 +151,7 @@ namespace CloverEngine
             PathIndex = 1;      // 第 0 个是当前格，不用"到达"
         }
 
-        /// <summary>丢弃当前路径（**不动** `PathTarget` / `HasPathTarget`，与项目原实现一致）。</summary>
+        /// <summary>丢弃当前路径（**不动** `PathTarget` / `HasPathTarget`）。</summary>
         public void ClearPath()
         {
             Path = null;

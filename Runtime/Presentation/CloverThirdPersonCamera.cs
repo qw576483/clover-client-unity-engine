@@ -123,7 +123,7 @@ namespace CloverEngine
         void CacheTargetRenderers()
         {
             // 换目标 / 清目标前，先把**旧目标**被隐藏的 Renderer 恢复 ——
-            // 原实现只把 _targetHidden 复位（隐藏状态随之被遗忘），旧角色模型永久不可见。
+            // 只复位 _targetHidden 会把隐藏状态遗忘，旧角色模型永久不可见。
             if (_targetHidden && _targetRenderers != null)
             {
                 foreach (var r in _targetRenderers)
@@ -189,7 +189,7 @@ namespace CloverEngine
             }
 
             // ---------- ⑤ 不钻到地面以下（相对**地面**而不是绝对世界 Y）----------
-            // 原实现与绝对 Y 比较：地形整体抬高后（地面 Y≠0）固定的 0.35 早已在地下，相机照样钻地。
+            // ⛔ 不拿绝对世界 Y 比较：地形整体抬高后（地面 Y≠0）固定的 0.35 早已在地下，相机照样钻地。
             var minY = MinHeightAboveGround;
             if (Physics.Raycast(pivot + Vector3.up, Vector3.down, out var groundHit, 500f,
                     BlockMask, QueryTriggerInteraction.Ignore))

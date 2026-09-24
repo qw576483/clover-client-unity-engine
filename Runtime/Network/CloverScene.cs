@@ -53,9 +53,9 @@ namespace CloverEngine
             _attachedHandler = null;
         }
 
-        // 【本节整体未接线】OnChanged / OffChanged / RegisterMappings / ResolveUnityScene 当前全仓
+        // 【本节调用面】OnChanged / OffChanged / RegisterMappings / ResolveUnityScene 当前全仓
         // （Runtime/Editor/Tests/Samples~/Tools~）无调用点，属**公开契约**（场景名映射与场景变更通知，
-        // 供业务 / 上层流程编排使用）——尚未接线，业务可直接使用，不要按「无人使用」删除。
+        // 供业务 / 上层流程编排使用）——业务可直接使用，不要按「无人使用」删除。
         public void OnChanged(Action<ICloverScene> handler)
         {
             if (handler != null) _handlers.Add(handler);

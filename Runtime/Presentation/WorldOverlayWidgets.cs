@@ -2,12 +2,6 @@
 // CloverEngine · Runtime/Presentation/WorldOverlayWidgets.cs
 // 「世界 / 屏幕叠加层」四件通用件（**只做机制**：池化 · 定位 · 显隐 · 渐隐 · 跟随）。
 //
-// 来源（四件分别来自 clover-project-diablo2 的 UI 实现，逐项把**机制**收敛到引擎）：
-//   · UI/GroundItemLabelView.cs → WorldProjectedLabelLayer（世界投影标签层：**按 id 池化复用、持久显示**）
-//   · UI/EnemyBarView.cs        → ScreenTargetBar（屏幕顶部目标条）+ WorldNameplate（世界内名牌）
-//   · UI/LevelEntryTitle.cs     → CenterAnnounceLayer（居中公告条：淡入 / 停留 / 淡出）
-//   · UI/CursorView.cs          → SoftwareCursorLayer（软件多态光标：独立常驻画布 + 跟随鼠标）
-//
 // ⛔ 本文件**零项目专有**：不出现任何业务类名 / 文案 / 配色 / 字号 / 图标 / 素材路径 / 数据来源。
 //   文字渲染（位图字模 / uGUI `Text` / 图片拼字都行）由调用方实现 `IOverlayLabelView` 注入；
 //   文案、颜色、进度值、矩形几何、时长**逐次传参**；`nodeName` 这类只为可断言性存在，默认值中性。
@@ -19,7 +13,7 @@
 //   「世界点 → `UIFactory.UICamera()` 投影 → `ScreenPointUtil` → 画布局部点」口径，
 //   拆成四个文件只会多 4 个 `.cs.meta` 与 4 条 csproj 条目，换来的却是每件不足 300 行的碎片。
 //
-// 每件挡住的坑（失败模式都是"看着不对、却不报错"）：
+// 每件的失效模式（都是"看着不对、却不报错"）：
 //   · 世界点投影失败（相机缺失 / 点在相机背面 / 换算失败）⇒ **把该件藏起来**，⛔ 绝不画在错位置；
 //   · 池化复用必须**每次写全** 文案 / 颜色 / 位置 / 显隐 —— 漏写一项就是"复用出上一帧的残留"；
 //   · 目标条的进度填充走 `Slider.fillRect`（**锚点宽度**）而不是 `Image.fillAmount`：

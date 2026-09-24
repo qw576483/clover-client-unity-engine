@@ -1,14 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/ClientConfig.cs
-// 「带默认值的配置段」的**加载链**：多来源回退 + 容错解析 + 热改 Reload（能力下沉）。
+// 「带默认值的配置段」的**加载链**：多来源回退 + 容错解析 + 热改 Reload。
 //
-// 为什么要有它（下沉记录）：
-//   全工程只有业务侧 `clover-project-diablo2/client/Assets/Scripts/Core/ClientConfig.cs`
-//   在做「按顺序试 N 个配置来源 → 任一来源读不出/解析不了就退到下一个 → 全坏就用内置默认值
-//   → 改完文件能 Reload」这件事，而这段控制流**与 Unity 无关、与该项目的字段类型无关**，属通用底座
-//   （`patterns/engine-fix.md` §4.7 的 D 桶：通用横切设施，不是某一款 demo 的专有字段）。
-//   本件把这层控制流收进引擎；**字段类型（泛型 T）、具体来源（Unity 资源 / 磁盘文件 / 常量）、
-//   具体默认值全留调用方**（注入委托），业务侧只剩「这项目的 config.json 长什么样」。
+// 定位：把「外部给的一段文本」按顺序变成「一个带默认值的配置对象」——
+//   「按顺序试 N 个配置来源 → 任一来源读不出/解析不了就退到下一个 → 全坏就用内置默认值
+//   → 改完文件能 Reload」这条链就在本件里。
+//   字段类型（泛型 T）、具体来源（Unity 资源 / 磁盘文件 / 常量）、具体默认值全留调用方
+//   （注入委托）；⛔ 本件不预设任何一组取值。
 //
 // ⛔ 与 `Setting`（`Runtime/Core/Setting.cs`）/ `FileSlotStore`（`Runtime/Data/FileSlotStore.cs`）
 //    的分工（**别当第二套 Setting 用**，`结构规则.md` §3.2）：
@@ -27,11 +25,11 @@
 //   ④ 命中来源后过一遍可选的 `normalize`（业务在这里做逐字段兜底 / 裁剪 / 越界告警）；它抛异常
 //      同样只 Warn 并改用下一个来源（一个来源的规范化失败 ⇒ 该来源整体不可用）。
 //   ⑤ `Reload()` **重跑整条链**（换掉缓存值 + 更新 `Source` / `LoadCount`），供"改完配置不重启"用；
-//      `Source` 在首次加载前是 `NotLoadedSourceName`，**且读取它不会触发加载**（与业务侧旧行为一致）。
+//      `Source` 在首次加载前是 `NotLoadedSourceName`，**且读取它不会触发加载**。
 //   ⑥ 非线程安全：主线程使用（与 `Setting` / `FileSlotStore` 一致）。
 //   ⑦ 本件不依赖 UnityEngine（只用 `System`）⇒ 离线自检宿主（非 Unity 进程）可直接链进工程跑。
 //
-// 用法（首个消费方 = `clover-project-diablo2/client/Assets/Scripts/Core/ClientConfig.cs`）：
+// 用法：
 //   var loader = new ConfigSectionLoader<MyRoot>("Cfg",
 //       new[]
 //       {
@@ -44,13 +42,6 @@
 //   var cfg = loader.Value;      // 惰性：首次访问触发一次加载
 //   loader.Reload();             // 热改（重跑整条链）
 //   var log = loader.Source;     // "Resources/…" / "文件:…" / "默认值" / "(未加载)"
-//
-// ★ 与旧内联实现的等价性 / 已知差异（片 eng-coreutil 自证，见 `引擎问题.md` 那一行）：
-//   · 逐来源的文案（`Resources 读取 … 异常` / `未找到配置文件 …` / `解析失败…回退默认值`）仍由
-//     调用方的委托与解析器产生 ⇒ **日志文本一字未改**；本件只补两条来源级的跳过日志
-//     （"读取异常…改试下一个来源" / "解析失败…改试下一个来源"）与一条总兜底日志。
-//   · 「空白文本」由旧实现的"只有资源来源判空、文件来源不判"统一为**所有来源都视为没有内容**
-//     （语义更整齐；配置值不变，只少一条对空文件报的解析错误）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System;
@@ -193,7 +184,7 @@ namespace CloverEngine
                     continue;
                 }
 
-                // ③ 没有内容：静默跳过（不是异常；旧实现里"资源为空"就是这条语义）
+                // ③ 没有内容：静默跳过（不是异常）
                 if (string.IsNullOrWhiteSpace(text)) continue;
 
                 var from = string.IsNullOrEmpty(source.LogLabel) ? source.Name : source.LogLabel;

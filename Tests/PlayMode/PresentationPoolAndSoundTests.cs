@@ -6,7 +6,7 @@ using UnityEngine.TestTools;
 namespace CloverEngine.Tests
 {
     /// <summary>
-    /// 表现域本次新增能力的 PlayMode 回归用例（**未实跑声明**：本轮禁止启动 Unity，本文件只做静态审查）。
+    /// 表现域能力的 PlayMode 回归用例。
     /// <para>
     /// 覆盖：① <c>IObjectPool.Register</c> 的代码工厂路径（工厂优先 / 复用时不重复调用 / 工厂返回 null
     /// 明确失败 / 重复注册覆盖 / 传 null 注销并回落 Resources）；② <c>ISoundManager.IsMuted</c> 与
@@ -17,7 +17,7 @@ namespace CloverEngine.Tests
     /// 且 <c>ObjectPool.Despawn</c> 会经 <c>DontDestroyOnLoad</c> 建常驻池根节点 ——
     /// <c>DontDestroyOnLoad</c> 的语义只在播放态成立。
     /// <c>FloatText</c> 的升距/淡出（需真实 Canvas + 相机投影）与 <c>CameraManager.Main</c>
-    /// （依赖场景里有没有 MainCamera 标签）属人工验证范围，见交付回报。
+    /// （依赖场景里有没有 MainCamera 标签）属人工验证范围。
     /// </para>
     /// </summary>
     public class PresentationPoolAndSoundTests

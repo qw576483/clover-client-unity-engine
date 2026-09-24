@@ -12,8 +12,8 @@ namespace CloverEngine
         // ───────────── 网络参数默认值（**唯一出处**） ─────────────
         //
         // 这些常量是本组网络参数默认值的唯一来源：GameConfig 自己的字段初始化器用它，
-        // NetworkManager 的「未配置 / 0 值」兜底也用它（此前 NetworkManager 里另抄了一份同样的
-        // 字面量，改一处漏一处就会让「配置缺省时到底用哪套默认值」两处静默分歧）。
+        // NetworkManager 的「未配置 / 0 值」兜底也用它（若两处各抄一份同样的字面量，
+        // 改一处漏一处就会让「配置缺省时到底用哪套默认值」静默分歧）。
         // ⚠️ 改这里的数值 = **行为变更**（心跳、超时、重连、保活直接影响运行表现），不要顺手调。
 
         /// <summary>TCP 心跳间隔默认值（毫秒）。</summary>
@@ -176,9 +176,8 @@ namespace CloverEngine
         /// <para>
         /// <b>为什么需要它</b>：引擎只有一份全局状态机，它表达的是**应用级流程**（登录 / 主城 / 战斗）。
         /// 业务需要"每个 Bot / 每个单位各自一棵"的局部状态机时，把状态注册到 <see cref="Fsm"/> 上会让
-        /// 多个实体共用同一个 <see cref="IFsm.Current"/> 并互相覆盖 ⇒ 结构上不成立；而在本方法出现前
-        /// 业务只能**逐字复刻** <see cref="Fsm"/> 的实现（实例：clover-project-cs16 的
-        /// <c>Module/Bot/CsBotFsm.cs</c> 整份复制了自环守卫 / 回调内再转换排队 / 连锁上限 8 / 异常隔离）。
+        /// 多个实体共用同一个 <see cref="IFsm.Current"/> 并互相覆盖 ⇒ 结构上不成立
+        /// （自环守卫 / 回调内再转换排队 / 连锁上限 8 / 异常隔离都必须走 <see cref="Fsm"/> 的实现）。
         /// </para>
         /// <para>
         /// <b>用法</b>：<c>var botFsm = Game.NewFsm(); botFsm.RegisterState(...); 然后自己按帧调 botFsm.Tick(dt);</c>
@@ -265,7 +264,7 @@ namespace CloverEngine
         /// </summary>
         public static IResourceManager Res { get; private set; }
 
-        // 实体管理器与对象池：接口已下沉到 Core（见 EntityPool.cs），实现由 Presentation 提供。
+        // 实体管理器与对象池：接口在 Core（见 EntityPool.cs），实现由 Presentation 提供。
         public static IEntityManager Entity { get; private set; }
 
         public static IObjectPool Pool { get; private set; }
@@ -386,17 +385,17 @@ namespace CloverEngine
 
             if (config == null)
             {
-                // 此时尚未建立落盘 Logger：用当前兜底 Logger（ConsoleLogger）把原因说清楚再抛出，
-                // 旧实现直接 NRE 在 config.LogDir 上，异常无任何上下文。
+                // 此时尚未建立落盘 Logger：用当前兜底 Logger（ConsoleLogger）把原因说清楚再抛出
+                // （否则会在 config.LogDir 上直接 NRE，异常无任何上下文）。
                 Logger?.Error("Game", "Launch failed: config is null (GameConfig is required)");
                 throw new ArgumentNullException(nameof(config), "Game.Launch: config must not be null");
             }
 
             Config = config;
 
-            // 构造阶段整体护航：任一步失败都回滚到"未启动"的干净状态。
-            // 旧实现无 try/catch：中断后残留 Logger 后台线程 + 半赋值的门面 + IsRunning=false，
-            // 重试 Launch 还会再建一份；反向的半拆卸（IsRunning=true 残留）则由 Shutdown 侧兜底。
+            // 构造阶段整体护航：任一步失败都回滚到"未启动"的干净状态（无护航则中断后会残留
+            // Logger 后台线程 + 半赋值的门面 + IsRunning=false，重试 Launch 还会再建一份）；
+            // 反向的半拆卸（IsRunning=true 残留）由 Shutdown 侧兜底。
             try
             {
                 _logger = new Logger(config.LogDir ?? "logs");
@@ -595,7 +594,7 @@ namespace CloverEngine
 
             if (_router == null)
             {
-                // CloverNet.Init 之前注册：旧实现 _router?.OnMsg 静默丢弃，业务以为注册成功，
+                // CloverNet.Init 之前注册：_router?.OnMsg 会静默丢弃，业务以为注册成功，
                 // 最终表现为"消息永远不来"；这里必须报错（与上面保留段拒绝的行为一致）。
                 Logger?.Error("Game",
                     $"OnMsg({msgID}) rejected: router not attached yet - call CloverNet.Init(...) before registering message handlers");
@@ -721,7 +720,7 @@ namespace CloverEngine
         /// 执行已注册的启动钩子。单个钩子抛异常不影响其余钩子，仅记录错误日志。
         /// <para>
         /// 先对 <c>Values</c> 做快照再遍历：钩子内再调 <see cref="RegisterLaunchHook"/> 会修改字典，
-        /// 直接 foreach 会抛 InvalidOperationException —— 旧实现这样使 Launch 半途中断
+        /// 直接 foreach 会抛 InvalidOperationException，使 Launch 半途中断
         /// （而此时 <c>IsRunning</c> 已为 true，后续 Launch 全被 "Already running" 早退）。
         /// </para>
         /// </summary>
@@ -742,8 +741,8 @@ namespace CloverEngine
         /// 引擎每帧驱动入口，按顺序刷新输入、消息派发、定时器、状态机及网络同步。
         /// 引擎未运行时调用无效。
         /// <para>
-        /// 每个子系统单独隔离：任一子系统 Tick 抛异常只记日志、不中断本帧后续 ——
-        /// 旧实现无任何隔离，<c>Fsm.OnTick</c> 一类异常会让 Net/Sync/Res/UI/Anim/Camera/Quality 全部不执行。
+        /// 每个子系统单独隔离：任一子系统 Tick 抛异常只记日志、不中断本帧后续（否则
+        /// <c>Fsm.OnTick</c> 一类异常会让 Net/Sync/Res/UI/Anim/Camera/Quality 全部不执行）。
         /// </para>
         /// </summary>
         /// <param name="dt">自上一帧经过的时间（秒）。</param>
@@ -784,8 +783,8 @@ namespace CloverEngine
         /// 关闭引擎，断开网络连接并释放各子系统占用的资源。引擎未运行时调用无效（可重复调用，幂等）。
         /// <para>
         /// 拆卸的每一步单独隔离：任一模块抛异常都只记日志并继续拆其余模块，
-        /// 收尾统一复位全部门面与 <see cref="IsRunning"/> —— 旧实现无隔离且 <c>IsRunning = false</c>
-        /// 排在最后，任一模块抛异常即残留 "IsRunning=true 的半拆卸状态"，此后 Launch 全被早退、引擎再也起不来。
+        /// 收尾统一复位全部门面与 <see cref="IsRunning"/>（若隔离缺失且 <c>IsRunning = false</c>
+        /// 排在最后，任一模块抛异常即残留 "IsRunning=true 的半拆卸状态"，此后 Launch 全被早退、引擎再也起不来）。
         /// </para>
         /// </summary>
         public static void Shutdown()
@@ -817,7 +816,7 @@ namespace CloverEngine
             TeardownStep("Pool.ClearAll", () => Pool?.ClearAll());
 
             // 设置落盘：不显式 Save 的话，最后一次 Set 的配置只留在内存里（标记为脏），
-            // 进程退出即静默丢失 —— 旧实现从不 Save。
+            // 进程退出即静默丢失。
             TeardownStep("Setting.Save", () => Setting?.Save());
 
             TeardownStep("Logger.Dispose", () => (_logger as Logger)?.Dispose());
@@ -855,7 +854,7 @@ namespace CloverEngine
             Camera = null;
             Quality = null;
 
-            // Core 门面同样必须置空（旧实现漏了这一段）：不置空的话 Shutdown 之后这些门面仍指向
+            // Core 门面同样必须置空：不置空的话 Shutdown 之后这些门面仍指向
             // 旧实例 —— 业务再 Post 只会入永不 flush 的死队列，事件/定时器/状态机订阅悄悄失效。
             Dispatcher = null;
             Event = null;

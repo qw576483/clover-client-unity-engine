@@ -168,9 +168,8 @@ namespace CloverEngine
 
     /// <summary>
     /// TCP 长连接实现，传输层帧格式：[1B type][4B 大端 len][payload]。
-    /// type 约定：0=数据帧（payload 为客户端帧） 1=ping 2=pong。
-    /// （原 3=migrate「连接迁移令牌帧」已随服务端删除 —— 服务端 tcp/codec.go 移除了 frameTypeMigrate，
-    /// 整条迁移链路不可达；类型 3 现在**两端**都按「未知帧类型」处理。）
+    /// type 约定：0=数据帧（payload 为客户端帧） 1=ping 2=pong；类型 3（原 migrate「连接迁移令牌帧」）
+    /// **两端**都按「未知帧类型」处理（服务端 tcp/codec.go 无 frameTypeMigrate，整条迁移链路不可达）。
     /// 单帧 payload 软上限 10MiB、硬上限 10MiB（与服务端一致：TCP/WS/QUIC 统一 10MiB）。
     /// 收发与心跳均由后台线程承担（非阻塞连接 + 15 秒无发送自动 ping + 收 ping 回 pong），
     /// 即使主线程挂起（OnApplicationPause）心跳也不会停发，避免被服务端读超时踢除。
@@ -274,8 +273,8 @@ namespace CloverEngine
         /// <param name="addr">"host:port" 形式地址</param>
         public void ConnectAsync(string addr)
         {
-            // 先校验地址：非法地址在动旧连接**之前**同步抛（旧实现先 DisconnectCore 再校验，
-            // 传入非法地址时原可用连接已被拆掉且无回滚）。
+            // 先校验地址：非法地址在动旧连接**之前**同步抛
+            //（否则传入非法地址时原可用连接已被拆掉且无回滚）。
             if (!NetAddr.TryParse(addr, out var host, out var port))
                 throw new FormatException($"invalid addr: {addr}");
 
@@ -299,7 +298,7 @@ namespace CloverEngine
                 if (connectTask.Status != TaskStatus.RanToCompletion)
                 {
                     // 失败原因藏在 connectTask 上：读它的异常（= 观察，避免未观察 Task 异常）
-                    // 并写进日志；旧实现不观察异常、只报一句笼统的 "connect failed or timeout"。
+                    // 并写进日志。
                     if (!connectTask.IsCompleted)
                     {
                         // 超时路径：connectTask 之后仍可能以异常收尾，挂个观察器兜住
@@ -413,8 +412,7 @@ namespace CloverEngine
                 return;
             }
 
-            // 直接编码成整帧（一次分配）：旧实现先拷一份 payload、EncodeFrame 再拷一份整帧
-            // （每帧两次分配两次拷贝）；现在"帧头 + 数据"一次布局完成。
+            // 直接编码成整帧（一次分配）："帧头 + 数据"一次布局完成。
             EnqueueBounded(_sendQueue, EncodeFrame(FrameTypeData, data, offset, count), "send");
             try
             {
@@ -507,7 +505,7 @@ namespace CloverEngine
                     }
                     firstFrame = false;
 
-                    // 长度前缀是 4B 大端**无符号**数：旧实现直接强转 int，≥ 0x80000000 时会变负，
+                    // 长度前缀是 4B 大端**无符号**数：直接强转 int 会让 ≥ 0x80000000 的值变负，
                     // 既不超硬上限也不 > 0 → 被当空 payload 丢弃、实际字节没读走，流从此错位且零报错。
                     // 先用 uint 比上限、再转 int（QUIC 侧 QuicStreamFraming.Extract 同样先判负）。
                     var rawLen = BigEndian.ReadUInt32(ReadExact(4), 0);
@@ -535,8 +533,7 @@ namespace CloverEngine
                         case FrameTypePong:
                             // 心跳应答，无需处理
                             break;
-                        // 原 case FrameTypeMigrate（只打日志、从不发送迁移令牌）已删除：服务端已移除
-                        // frameTypeMigrate，类型 3 现在落到 default 按「未知帧类型」留痕，两端口径一致。
+                        // 服务端已无 frameTypeMigrate：类型 3 落到 default 按「未知帧类型」留痕，两端口径一致。
                         default:
                             Game.Logger?.Warn("Network", $"tcp unknown frame type: {type}");
                             break;
@@ -544,8 +541,7 @@ namespace CloverEngine
                 }
                 catch (Exception e)
                 {
-                    // 连接被断开或读取出错：原因必须带出来（旧实现只报固定串，
-                    // 读取超时 / 协议错 / 编程错全部无法区分）
+                    // 连接被断开或读取出错：原因必须带出来（区分读取超时 / 协议错 / 编程错）
                     if (_running && _generation == gen)
                         HandleLinkFailure(gen, $"recv failed: {e.GetType().Name}: {e.Message}");
                     return;
@@ -856,8 +852,7 @@ namespace CloverEngine
             }
 
             // 长度校验（服务端口径：udp.defaultMaxPacketSize = 65507）：超限的 datagram 发出去
-            // 必被 OS 丢弃（服务端永远收不到，仅远端 "udp send failed" 告警），本地先拦并明确告警
-            //（原实现无任何上限校验，超限发送静默失败、业务无感知）。
+            // 必被 OS 丢弃（服务端永远收不到，仅远端 "udp send failed" 告警），本地先拦并明确告警。
             if (count < 0 || count > MaxDatagramBytes - 1)
             {
                 Game.Logger?.Error("Network",
@@ -917,7 +912,7 @@ namespace CloverEngine
                 {
                     if (_running)
                     {
-                        // 收包循环失败必须留痕（旧实现只 Disconnect、无任何日志，UDP 通道静默失效无法排障）
+                        // 收包循环失败必须留痕（否则 UDP 通道静默失效无法排障）
                         Game.Logger?.Warn("Network", $"udp recv failed: {e.GetType().Name}: {e.Message}");
                         Disconnect();
                     }

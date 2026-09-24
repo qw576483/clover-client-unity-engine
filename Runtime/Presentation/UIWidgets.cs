@@ -19,9 +19,8 @@ namespace CloverEngine
     /// 运行时 uGUI 构件工厂：创建节点 / 面板 / 文本 / 按钮，取内置字体。
     /// <para>
     /// <b>对业务公开</b>：业务"用代码搭 UI"时一律用这里，不要自己再写一套
-    /// 锚点/铺满/文字的工具类 —— 那类重复实现正是踩坑高发区
-    /// （业务自建的 `UIBuilder` 就栽在"面板根节点没铺满"上，而本类的
-    /// <see cref="Stretch"/> 正好能防住它）。
+    /// 锚点/铺满/文字的工具类（重复实现最容易漏掉"面板根节点没铺满"，
+    /// 而本类的 <see cref="Stretch"/> 正好能防住它）。
     /// </para>
     /// <para>
     /// 只暴露"造节点"这几个纯机械函数；<see cref="ToastLayer"/> 等通用件仍是 internal，
@@ -157,7 +156,7 @@ namespace CloverEngine
             //      （挂钩会把这些当数据源，例如按 fontSize 选字模档位）；也才不会被上面的
             //      `text.font = DefaultFont()` 覆盖回去（本例里挂钩通常把 font 清成 null）。
             //   ② 未注册挂钩（`TextHooks.Current == null`）时它只做一次判空即返回 ⇒
-            //      **行为与本次改动之前逐字一致**（不分配、不写 Text、不打日志）。
+            //      **行为不变**（不分配、不写 Text、不打日志）。
             //   ③ 挂钩抛异常由 `TextHooks.NotifyCreated` 吞掉 + Warn 一次 ⇒ 通用件照常打开。
             TextHooks.NotifyCreated(text);
             return text;
@@ -210,7 +209,7 @@ namespace CloverEngine
         /// <para>
         /// <b>字体与"静默变全大写"</b>：<paramref name="font"/> 为 <c>null</c> 时用引擎内置字体
         /// （<see cref="DefaultFont"/>），并**降频 Warn 一次** —— 像素 / 点阵字体常常只有大写字形，
-        /// 小写会被静默渲染成全大写（<c>BY CLOVER-ENGINE</c>），这是真实发生过的事故；
+        /// 小写会被静默渲染成全大写（<c>BY CLOVER-ENGINE</c>）；
         /// 而"源码里字符串对"并不等于"画面上文字对"（唯一判据是实机截图）。
         /// 需要保证小写的项目请显式传入带小写字形的字体。
         /// </para>
@@ -224,7 +223,7 @@ namespace CloverEngine
         /// <param name="font">字体；<c>null</c> = 引擎内置字体（会 Warn 一次，见上）。</param>
         /// <param name="fontSize">字号（默认 14：小而不抢画面）。</param>
         /// <param name="bottomOffset">离父节点底边的距离（画布单位，正数向上）。</param>
-        /// <param name="text">文案；默认值逐字 = <c>by clover-engine</c>（首字母小写，⛔ 不要改大小写）。</param>
+        /// <param name="text">文案；默认值 = <c>by clover-engine</c>（首字母小写，⛔ 不要改大小写）。</param>
         /// <returns>创建出的 <see cref="Text"/> 组件（供业务改色 / 改字号 / 断言实际文本与字体）。</returns>
         public static UnityEngine.UI.Text CreateCreditLabel(
             UnityEngine.Transform parent,
@@ -247,7 +246,7 @@ namespace CloverEngine
             if (font == null)
             {
                 // 非预期分支（未指定字体）：像素/点阵字体常只有大写字形 ⇒ 小写会被静默渲染成全大写。
-                // 静默通过比报错更糟（源码字符串逐字正确、画面上却是 BY CLOVER-ENGINE），故必须留痕。
+                // 静默通过比报错更糟（源码字符串正确、画面上却是 BY CLOVER-ENGINE），故必须留痕。
                 LogThrottle.WarnOnce("UI", CreditFontKey,
                     $"署名行未指定字体，已回落到引擎内置字体（{label.font?.name}）：" +
                     "像素/点阵字体常只有大写字形，小写会被静默渲染成全大写（BY CLOVER-ENGINE）；" +
@@ -406,9 +405,8 @@ namespace CloverEngine
         private const float DefaultDuration = 1.2f;
 
         /// <summary>
-        /// **本次下沉前**的上升距离，单位 = 画布局部单位（≈ 参考分辨率下的屏幕像素），与相机距离无关。
-        /// 它同时是契约上 <c>riseWorld = 0</c> 时的默认升距 —— 保留它 = 保留旧行为，
-        /// 旧的调用方（不传新参）一个像素都不会变。
+        /// 默认上升距离，单位 = 画布局部单位（≈ 参考分辨率下的屏幕像素），与相机距离无关。
+        /// 它同时是契约上 <c>riseWorld = 0</c> 时的默认升距 —— 不传新参的调用方一个像素都不会变。
         /// </summary>
         private const float RiseDistance = 70f;
 
@@ -640,7 +638,7 @@ namespace CloverEngine
             _label.rectTransform.sizeDelta = new Vector2(600f, 44f);
             _label.rectTransform.anchoredPosition = new Vector2(0f, -80f);
 
-            // ★ 进度条（本次新增）：**确定进度**时才显示，与上面的"转圈"并列 ——
+            // ★ 进度条：**确定进度**时才显示，与上面的"转圈"并列 ——
             //   转圈回答"没卡死"，进度条回答"还差多少"，两者不互斥（原版加载页也是转圈 + 读条同时有）。
             var track = UIFactory.CreateCentered("ProgressTrack", safe,
                 new Vector2(ProgressWidth, ProgressHeight), new Vector2(0f, ProgressY));
@@ -1240,35 +1238,32 @@ namespace CloverEngine
     ///     同一类陷阱的另一种形态。</item>
     /// </list>
     ///
-    /// <h4>① 缺陷（D129b 修）</h4>
-    /// 两个 Quad 的 <see cref="Renderer.sortingOrder"/> 从来没设过 ⇒ 恒为 0。而业务侧的单位/怪物精灵
-    /// 通常在一个远大于 0 的层级上（例：`UnitView.SortingOrder.Unit` = 1000 + 纵深），于是**血条被
+    /// <h4>① 为什么需要这个参数</h4>
+    /// 两个 Quad 的 <see cref="Renderer.sortingOrder"/> 恒为 0。而业务侧的单位/怪物精灵
+    /// 通常在一个远大于 0 的层级上（例：单位层 = 1000 + 纵深），于是**血条被
     /// 自己单位的精灵盖住**：血条"时有时无、贴脸才看得见"，且不报任何错。
     ///
     /// <h4>② 最小复现</h4>
     /// 在任意 2D 项目里给一个 <c>sortingOrder = 1000</c> 的 SpriteRenderer 挂一条 `WorldHpBar`
     /// （其 Quad order = 0），两者屏幕位置重叠时血条不可见；把 <c>sortingOrder</c> 传成 &gt; 1000 即显示。
     /// 判据 = 运行时读 <c>GetComponentInChildren&lt;WorldHpBar&gt;().transform.GetChild(0)
-    /// .GetComponent&lt;MeshRenderer&gt;().sortingOrder</c>（修复前 0，修复后 = 传入值）。
+    /// .GetComponent&lt;MeshRenderer&gt;().sortingOrder</c>（应等于传入值）。
     ///
-    /// <h4>③ 为什么是"加参数 + 默认 0"而不是"改默认值"</h4>
-    /// 工作区内还有别的消费方（`clover-project-diablo2` 的 `ViewModule.cs` 用
-    /// <c>WorldHpBar.Create(...)</c> 且不传本参数）⇒ 改默认值会**静默改变它们的渲染顺序**。
-    /// 所以本参数默认 0（= 旧行为，逐位不变），需要"压在单位之上"的项目自己传（首个消费方 =
-    /// `clover-project-cr` 的 `UnitView.cs`，传 `SortingOrder.HpBar` = 2000）。
+    /// <h4>③ 默认值为什么是 0</h4>
+    /// 本参数默认 0（与不传本参数时的排序值逐位一致）⇒ 不传参的调用方渲染顺序不变；
+    /// 需要"压在单位之上"时由调用方自己传更大的值。
     ///
     /// <h4>④ 已知边界</h4>
     /// 引擎不知道业务层级表，所以本类只**透传**这个值，不猜。同一实例的 <c>sortingOrder</c> 在
     /// 幂等复用（`Create` 命中已有实例）时会一起更新（`ApplyParams`），热更/换皮场景不会留旧值。
     /// 两个 Quad 用**同一个** order：它们的先后由广告牌朝向决定（Fill 的 local z = -0.01 ⇒ 更贴近相机
-    /// ⇒ 后画 ⇒ 盖住 Bg），与修复前一致，不受本改动影响。
+    /// ⇒ 后画 ⇒ 盖住 Bg）。
     ///
-    /// <h4>⑤ 用法 / 首个消费方</h4>
+    /// <h4>⑤ 用法</h4>
     /// <code>
     /// var bar = WorldHpBar.Create(viewRoot.transform, tag: "Knight.Hp", sortingOrder: 2000);
     /// bar.SetHp(60, 60);
     /// </code>
-    /// 首个消费方：`clover-project-cr/client/Assets/Scripts/View/UnitView.cs`（`SortingOrder.HpBar`）。
     ///
     /// 用法：
     /// <code>
@@ -1289,9 +1284,8 @@ namespace CloverEngine
         public const float DefaultYOffset = 2.15f;
 
         /// <summary>
-        /// 默认渲染顺序。**刻意保持 0**（= 修复前行为）：引擎不知道业务的层级表，改默认值会静默改变
-        /// 已有消费方（如 `clover-project-diablo2`）的渲染顺序。需要"压在单位精灵之上"的项目自行传
-        /// （首个消费方 `clover-project-cr` 传 2000，推导见 `UnitView.SortingOrder.HpBar`）。
+        /// 默认渲染顺序。**刻意保持 0**：引擎不知道业务的层级表，只透传传入值、不猜。
+        /// 需要"压在单位精灵之上"时由调用方自行传更大的值。
         /// </summary>
         public const int DefaultSortingOrder = 0;
 
@@ -1326,7 +1320,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 两个 Quad 的渲染顺序（= <see cref="Create"/> 传入值）。业务侧可用它做**不变量断言**：
-        /// 血条层必须大于自己的单位/怪物精灵层，否则血条会被盖住（修复前恒为 0）。
+        /// 血条层必须大于自己的单位/怪物精灵层，否则血条会被盖住。
         /// </summary>
         public int SortingOrder => _sortingOrder;
 
@@ -1340,7 +1334,7 @@ namespace CloverEngine
         /// <param name="height">高度（米）</param>
         /// <param name="yOffset">离宿主节点的高度（米）</param>
         /// <param name="tag">日志标签（多套实体用不同标签便于排障）</param>
-        /// <param name="sortingOrder">两个 Quad 的渲染顺序。默认 0 = 旧行为；业务侧单位精灵层级较高时
+        /// <param name="sortingOrder">两个 Quad 的渲染顺序。默认 0 = 既有排序值；业务侧单位精灵层级较高时
         /// 必须传一个更大的值，否则血条会被单位精灵盖住（见类注释「① 缺陷」）。</param>
         public static WorldHpBar Create(Transform target, float width = DefaultWidth,
             float height = DefaultHeight, float yOffset = DefaultYOffset, string tag = "HpBar",
@@ -1466,7 +1460,7 @@ namespace CloverEngine
             // "取用同一个池对象后强制显示"会退化成**空操作**，血条永久不显示且不报错。
             if (_visible == visible && _bgRenderer != null && _bgRenderer.enabled == visible) return;
             _visible = visible;
-            // 只切两个 Quad 的渲染器（原实现每次 GetComponentsInChildren 都新分配一个数组，
+            // 只切两个 Quad 的渲染器（`GetComponentsInChildren` 每次调用都会新分配一个数组，
             // 频繁显隐会在热路径上持续产生 GC）。
             if (_bgRenderer != null) _bgRenderer.enabled = visible;
             if (_fillRenderer != null) _fillRenderer.enabled = visible;

@@ -177,8 +177,8 @@ namespace CloverEngine
         {
             get
             {
-                // 每帧只结算一次：原实现每次读取都刷新 _lastMouse，同一帧第二次读取恒为 (0,0)，
-                // 多个读取方（相机 / 业务）会互相吃掉位移。
+                // 每帧只结算一次（⛔ 每次读取都刷新 _lastMouse 会让同一帧第二次读取恒为 (0,0)，
+                // 多个读取方（相机 / 业务）互相吃掉位移）。
                 if (_deltaFrame == Time.frameCount) return _cachedDelta;
 
                 var cur = MousePosition;
@@ -334,8 +334,8 @@ namespace CloverEngine
         {
             if (target == null) return null;
             var t = target.GetType();
-            // 用 (Type, name) 复合键直接查缓存：原实现每次调用先拼 "FullName.name" 字符串，
-            // 命中缓存也照样分配新串（Bool / GetValue 是每帧高频路径）。
+            // 用 (Type, name) 复合键直接查缓存：⛔ 不拼 "FullName.name" 字符串 —— 命中缓存也会照样
+            // 分配新串（Bool / GetValue 是每帧高频路径）。
             var cacheKey = (t, name);
             if (PropCache.TryGetValue(cacheKey, out var cached)) return cached;
             var p = t.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.FlattenHierarchy);
@@ -561,7 +561,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 滚轮轴：把 InputSystem 的像素级 scroll 值换算成旧输入 "Mouse ScrollWheel" 的量纲
-        /// （旧后端一格滚轮 ≈ 0.1）。原实现只认 Horizontal/Vertical，该轴恒 0 —— 滚轮缩放整条静默失效。
+        /// （旧后端一格滚轮 ≈ 0.1）。⛔ 不能只认 Horizontal/Vertical：该轴恒 0 ⇒ 滚轮缩放整条静默失效。
         /// </summary>
         private float ReadScrollWheel()
         {
@@ -582,7 +582,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 触屏点数：经反射读 <c>Touchscreen.current.activeTouches</c>（老版本退化为 primaryTouch.press）。
-        /// 原实现恒返回 0，而 InputManager 优先选新后端 ⇒ HasTouch / TouchDown 恒 false，移动端触摸静默失效。
+        /// ⛔ 不能恒返回 0：InputManager 优先选新后端 ⇒ HasTouch / TouchDown 恒 false，移动端触摸静默失效。
         /// </summary>
         public int TouchCount
         {
@@ -1003,7 +1003,7 @@ namespace CloverEngine
                 if (name == want) { hasWanted = true; continue; }
 
                 // 只清"另一个后端"的模块（StandaloneInputModule / InputSystemUIInputModule）：
-                // 业务自定的输入模块（TouchInputModule / 自定义模块）必须保留 —— 原实现按"类型名 != 目标"一律 Destroy。
+                // 业务自定的输入模块（TouchInputModule / 自定义模块）必须保留 —— ⛔ 不许按"类型名 != 目标"一律 Destroy。
                 if (name != LegacyModule && name != ModernModule) continue;
 
                 // 两个 InputModule 并存会让点击/输入互相吃掉；Destroy 要等帧末才生效，

@@ -2,26 +2,22 @@
 // CloverEngine · Runtime/Core/EnterLatch.cs
 // 「进入触发一次、持续逗留不重复、离开重新武装」的通用**状态跃迁闩锁**（纯值类型，可直接离线断言）。
 //
-// 出处：clover-project-diablo2 `client/Assets/Scripts/Module/Map/ExitLatch.cs:25-69`
-//   （`ExitLatch`，整类语义照搬：`ShouldEmit(onExit, grid)` / `Fired` / `LastTriggerGrid` / `Reset`）。
-//   仅两处改写：① 由"出口格"泛化为"任意布尔区 + 任意载荷点"（⛔ 引擎不认 `TileKind.Exit` 这类项目语义）；
-//   ② `NoGrid` 哨兵改成 `HasLastTrigger`（泛型里没有"某类型的空值常量"可用，用布尔位表达同一件事）。
+// 口径要点：① 区与载荷点均由调用方以泛型给出（⛔ 引擎不认任何题材语义）；
+//   ② "是否已触发过"由 `HasLastTrigger` 布尔位表达（泛型里没有"某类型的空值常量"可用）。
 //
-// 为什么下沉：这是**任何"踩到某区域就触发一次"**（出口 / 接缝 / 陷阱 / 传送门 / 治疗泉 / 拾取区）
-//   都要的判据，且是**共享判据**——同一份口径会被"生产路径"与"离线断言"两处用到。
-//   项目侧各写一份的代价已被验证（`ExitLatch.cs:5-8` 原注释）：
-//     旧口径"记住上一格"在**沿出口列 / 接缝逐格挪动**时会**每格各发一次**（同一族缺陷，改一处漏一处）。
+// 适用面：**任何"踩到某区域就触发一次"**（出口 / 接缝 / 陷阱 / 传送门 / 治疗泉 / 拾取区）都用
+//   这一条判据；同一份口径会被"生产路径"与"离线断言"两处用到。
+//   ⛔ "记住上一格"的口径在**沿出口列 / 接缝逐格挪动**时会**每格各发一次** ⇒ 必须是状态跃迁闩锁。
 //
 // 语义（= 状态跃迁闩锁，**不是**"记住上一格"）：
 //   ① `inside == true` 且尚未发过 ⇒ 发一次（并记下本次触发点）；
 //   ② 仍 `inside`（**同一格或沿区域逐格挪动**）⇒ 不再发；
 //   ③ `inside == false` ⇒ 重新武装，下次再进入可再发（⛔ 不许把角色卡在区域里出不来）。
 //
-// 用法 + 首个消费方：
+// 用法：
 //   `var latch = new EnterLatch<Vector2Int>();`（持在持有者字段里，**不要每帧 new**）
 //   `if (latch.ShouldEmit(onExit, grid)) { /* 发过门请求 */ }`
 //   `latch.Reset()` 在"进图落位 / 传送 / 复活 / 复位"后调 —— 把玩家搬到别处后区域要能再触发一次。
-//   项目侧 `Module/Map/ExitLatch` 是它的薄封装（收尾片接线，本片不改项目文件）。
 //
 // 边界（⛔ 防止当万能药用）：
 //   · **只判"要不要发"**，不判"发去哪"、不判"什么算区域"（`inside` 由调用方按唯一口径算好再传）；
@@ -52,7 +48,7 @@ namespace CloverEngine
         /// <summary>是否处于"已发过、尚未重新武装"状态。</summary>
         public bool Fired => _fired != 0;
 
-        /// <summary>是否曾经触发过（<see cref="Reset"/> 后为 false）。</summary>
+        /// <summary>是否触发过（<see cref="Reset"/> 后为 false）。</summary>
         public bool HasLastTrigger => _hasLast;
 
         /// <summary>最近一次触发时记下的载荷（未触发过时 = <c>default(T)</c>，用 <see cref="HasLastTrigger"/> 判定）。</summary>

@@ -71,7 +71,7 @@ namespace CloverEngine
         /// <summary>
         /// 取某场景组的实体快照。
         /// <para>
-        /// 【未接线】引擎内部（Runtime/Editor/Tests）当前无调用点，保留为公开契约供业务使用
+        /// 【调用面】引擎内部（Runtime/Editor/Tests）当前无调用点，保留为公开契约供业务使用
         /// （按组遍历是本接口的既定能力）——不要按"无人使用"删除。
         /// </para>
         /// </summary>
@@ -108,9 +108,8 @@ namespace CloverEngine
         /// 为某个 <paramref name="key"/> 注册一个**代码工厂**：<see cref="Spawn"/> / <see cref="Preload"/>
         /// 时**优先用工厂造对象**，未注册的 key 才回落既有的 <c>Resources.Load&lt;GameObject&gt;(key)</c> 预制体路径。
         /// <para>
-        /// <b>为什么要有它</b>：G5 要求"战斗内 GameObject 一律走对象池"，但**代码造出来的对象**
-        /// （子弹 / 碎片 / 敌人 / 地块这类由逻辑 new 出来的）此前无法入池 —— 池只会去 Resources 找预制体，
-        /// 找不到就报错返回 null。于是这些对象只能绕过池裸 <c>Instantiate</c>，既违反 G5、又丢掉了复用。
+        /// <b>为什么要有它</b>：G5 要求"战斗内 GameObject 一律走对象池"，而**代码造出来的对象**
+        /// （子弹 / 碎片 / 敌人 / 地块这类由逻辑 new 出来的）需要一条入池通道：
         /// 注册工厂后，"怎么造"由业务决定，"什么时候复用 / 什么时候销毁"仍由池统一负责。
         /// </para>
         /// <para>
@@ -164,7 +163,7 @@ namespace CloverEngine
         /// <summary>
         /// 获取指定键名池中当前处于活跃状态的对象数量。
         /// <para>
-        /// 【未接线】引擎内部（Runtime/Editor/Tests）当前无调用点，保留为公开契约供业务/调试面板使用
+        /// 【调用面】引擎内部（Runtime/Editor/Tests）当前无调用点，保留为公开契约供业务/调试面板使用
         /// （实现已就绪：<c>Presentation/ObjectPool.cs</c>）——不要按"无人使用"删除。
         /// </para>
         /// </summary>
@@ -172,7 +171,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 获取指定键名池中当前处于非活跃（已回收）状态的对象数量。
-        /// <para>【未接线】同 <see cref="GetActiveCount"/>：实现已就绪、引擎内无消费点，保留为公开契约。</para>
+        /// <para>【调用面】同 <see cref="GetActiveCount"/>：实现已就绪、引擎内无消费点，保留为公开契约。</para>
         /// </summary>
         int GetInactiveCount(string key);
 
@@ -310,9 +309,8 @@ namespace CloverEngine
     /// 可被引用池管理的对象（**可选**实现）：池在取出/归还时回调，让对象自己复位状态。
     ///
     /// <para>
-    /// 为什么复位要有统一入口：复用对象最容易踩的坑是"忘了清干净上一次的字段"，
-    /// 而症状（上一局的伤害数字串到这一局）离根因非常远。把复位点固定在池的两个动作上，
-    /// 就不会出现"某个路径复用了但没复位"。
+    /// 为什么复位要有统一入口：把复位点固定在池的取出 / 归还两个动作上，
+    /// 就不会出现"某个路径复用了但没复位"（复用对象忘清上一次的字段，症状离得远、极难定位）。
     /// </para>
     /// </summary>
     public interface IReferencePoolable

@@ -10,21 +10,20 @@ namespace CloverEngine
     /// 契约类型（<see cref="IResourceManager"/>）定义于 Core；模块初始化经 <c>CloverRes.Init</c> 完成。
     /// </summary>
     /// <remarks>
-    /// 本次改造的三处行为变化（都是有意为之）：
+    /// 三处行为约定：
     /// <list type="number">
     ///   <item>
-    ///   <b>Release 不再立刻从缓存移除</b>：引用计数归零只表示「业务不再用」，
+    ///   <b>Release 不立刻从缓存移除</b>：引用计数归零只表示「业务不再用」，
     ///   缓存是否释放交给**字节水位 + LRU** 决定。否则「加载→立刻释放→再加载」会反复走磁盘/解包，
     ///   而缓存本来就是为了避免这件事。显式释放仍有 <see cref="UnloadAll"/>。
     ///   </item>
     ///   <item>
-    ///   <b>淘汰只针对未引用条目</b>：水位压不下去时**宁可超标也不强拆正在被引用的资源**。
-    ///   原实现「所有条目都被引用就强制移除最旧的」会把业务正在用的对象从缓存摘掉，
-    ///   并连带 Unload，业务侧随后拿到 Unity 的「假 null」，这类 bug 极难定位。
+    ///   <b>淘汰只针对未引用条目</b>：水位压不下去时**宁可超标也不强拆正在被引用的资源** ——
+    ///   强拆会把业务正在用的对象从缓存摘掉并连带 Unload，业务侧随后拿到 Unity 的「假 null」。
     ///   </item>
     ///   <item>
     ///   <b>同路径并发加载合并</b>：多个调用者同时加载同一路径时只发起一次真实加载，
-    ///   回调按注册顺序各收到一次。原实现会发起两次并把缓存条目互相覆盖（引用计数丢失）。
+    ///   回调按注册顺序各收到一次。
     ///   </item>
     /// </list>
     /// </remarks>
@@ -97,7 +96,7 @@ namespace CloverEngine
             var contentDir = ResolveContentDir(config);
             var builtinDir = config.BuiltinContentDir;
 
-            // 不配清单地址 = 不启用热更：保持改造前的行为（走 Resources）
+            // 不配清单地址 = 不启用热更：走 Resources 后端
             if (string.IsNullOrEmpty(config.ManifestUrl))
                 return new ResourceManager(new ResourcesBackend(config.Root), null, contentDir, builtinDir,
                     config.CacheWatermark);
@@ -312,8 +311,8 @@ namespace CloverEngine
                 var owner = pending.Backend ?? _backend;
                 var bytes = owner.EstimateBytes(pending.Path, asset);
                 // 引用计数 = 等待者数量 − 在途期间已 Release 的数量（每次 LoadAsset 对应一次 Release）。
-                // 原实现恒置 1：先 Release 的一方会把计数降到 0，条目被水位/LRU 提前淘汰，
-                // 其它仍持句柄的调用者随之失效（见类注释第 3 条）。
+                // 恒置 1 会让先 Release 的一方把计数降到 0，条目被水位/LRU 提前淘汰，
+                // 其它仍持句柄的调用者随之失效。
                 var refCount = pending.Callbacks.Count - pending.Releases;
                 if (refCount < 0) refCount = 0;
                 _cache[pending.Path] = new Entry { Asset = asset, RefCount = refCount, Bytes = bytes, Backend = owner };
@@ -488,7 +487,7 @@ namespace CloverEngine
         {
             if (_watermark <= 0 || _cachedBytes <= _watermark) return;
 
-            // 从 LRU 尾部**单次扫描**挑牺牲者：原实现每淘汰一个都从头重扫，批量淘汰退化成 O(n²)。
+            // 从 LRU 尾部**单次扫描**挑牺牲者（批量淘汰不退化成 O(n²)）。
             // 淘汰过程不回调业务代码，引用计数不会中途变化，因此一次遍历的判定始终有效。
             var node = _lru.Last;
             while (node != null && _cachedBytes > _watermark)

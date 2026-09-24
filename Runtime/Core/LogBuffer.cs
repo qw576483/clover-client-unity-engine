@@ -1,20 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/LogBuffer.cs
-// 运行时日志环形缓冲：**最近 N 行的只读窗口** —— 补 `ILogger` 只写不读的缺口，通用横切能力，下沉到引擎。
+// 运行时日志环形缓冲：**最近 N 行的只读窗口** —— 补 `ILogger` 只写不读的缺口，通用横切能力。
 //
-// 出处：clover-project-cs16 的 client/Assets/Scripts/UI/InGame/CsLogBuffer.cs（123 行，零 `Cs*` 引用）。
-//   语义逐条照搬：环形覆盖 / 行数版本号 / 线程安全入队 + 主线程搬运 / `Drain` 返回新增行数 /
-//   控制台本地回显（下沉后 `PushLocal` 改名 `Push`）/ 启动时 `BeforeSceneLoad` 自动挂钩。
+//   语义：环形覆盖 / 行数版本号 / 线程安全入队 + 主线程搬运 / `Drain` 返回新增行数 /
+//   控制台本地回显（`Push`）/ 启动时 `BeforeSceneLoad` 自动挂钩。
 //
-// ⛔ **没有下沉**（那是项目专属，不属于引擎）：
-//   · 「面板怎么画」—— 显示几行、怎么截断、输入框与命令解析全属表现 / 业务（项目 `ConsolePanel`）。
+// ⛔ **不属本件**（项目专属）：
+//   · 「面板怎么画」—— 显示几行、怎么截断、输入框与命令解析全属表现 / 业务。
 //   · 行级过滤 / tag 白名单 / 检索约定 —— 每个项目的日志检索脚本不同，引擎不替项目判定。
 //
-// 为什么下沉：`ILogger`（`Runtime/Core/Logger.cs:52-95`）只有 `Debug / Info / Warn / Error / Fatal`，
-//   **没有读取 / 订阅接口** —— 任何项目想做「游戏内控制台看最近日志」都得自己挂
-//   `Application.logMessageReceivedThreaded` 再写一遍环形缓冲（出处文件里那句"引擎 ILogger 只提供写、
-//   没有读取/订阅接口"就是代价记录）。收敛到引擎后，新项目不必再踩一次
-//   （与 `LogThrottle` 同批的 D 桶能力下沉，见 skill `patterns/engine-fix.md` §7）。
+// ★ 通用性依据：`ILogger`（`Runtime/Core/Logger.cs:52-95`）只有 `Debug / Info / Warn / Error / Fatal`，
+//   **没有读取 / 订阅接口** —— 本件补上这条读取通道（否则实现「游戏内控制台看最近日志」
+//   需自己挂 `Application.logMessageReceivedThreaded` 再写一遍环形缓冲）。
+//   （与 `LogThrottle` 同批的 D 桶能力，见 skill `patterns/engine-fix.md` §7）。
 //
 // 语义约束（改一条 = 语义漂移）：
 //   ① **不是第二套 `ILogger`**：本类只"收行 + 存最近 N 行"，不写行、不是日志门面，
@@ -202,7 +200,7 @@ namespace CloverEngine
             Pending.Enqueue($"[{DateTime.Now:HH:mm:ss}] {LevelTag(type)} {condition}");
         }
 
-        /// <summary>Unity 日志级别 → 缓冲行里的短级别标签（与出处项目逐字一致）。</summary>
+        /// <summary>Unity 日志级别 → 缓冲行里的短级别标签（`ERR` / `AST` / `WRN` / `EXC` / `LOG`）。</summary>
         private static string LevelTag(LogType type)
         {
             switch (type)

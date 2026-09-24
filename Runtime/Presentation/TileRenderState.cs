@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Presentation/TileRenderState.cs
-// 一格瓦片的**渲染状态**（不可变值类型）。通用底座，从 clover-project-diablo2 下沉。
+// 一格瓦片的**渲染状态**（不可变值类型）。通用底座。
 //
 // 为什么必须有这个类型（★ 影响范围：任何"节点池 + 逐格渲染"的 2D 地图）：
 //   ⛔ 对象池复用节点时，「复用出来的节点」与「新建的节点」必须给出**逐项相同**的画面 ——
@@ -16,30 +16,20 @@
 //   Position      → transform.position（世界坐标） （x/y/z 3 个标量）
 //   SortingOrder  → SpriteRenderer.sortingOrder
 //   ⚠️ 第 6 项 `SpriteRenderer.enabled` **不在本值里**：它是"被逐格业务改写的开关"
-//      （本项目里迷雾格会被置 false），由渲染方在写全 5 项时**一并复位为 true**。
+//      （如迷雾格会被置 false），由渲染方在写全 5 项时**一并复位为 true**。
 //
-// 出处（逐字搬运，⛔ 未改语义）：
-//   clover-project-diablo2 · client/Assets/Scripts/Module/Map/TileRenderState.cs:25-74
-//   （★ T0FIX-A 引入；首个消费方是 `Module/Map/MapView.cs` 的 `GroundState` / `ObjectState` /
-//     `FogState` 三个纯函数 + `ApplyTileState`。）
-//
-// <para><b>最小复现</b>：池化前 `MapView` 每次整图重铺都 `Destroy` 全部节点、再 `new GameObject`
-//   —— Town 56×40 ≈ 2000+ 节点，单帧 46.3~73.9 ms（≫ 一帧预算 16.67 ms）；池化后若"复用时不写全
-//   字段"，则第二张图会带着第一张图的贴图/颜色/排序号出现（实测形态见本仓 `TileNodePool.cs` 头注释、
-//   以及 `clover-project-diablo2/.ai-tmp/test/play-log` 的 T0FIX-I 黑屏记录）。</para>
+// <para><b>不写全字段的后果</b>：整图重铺（Town 56×40 ≈ 2000+ 节点）时若"复用节点不写全字段"，
+//   第二张图会带着第一张图的贴图/颜色/排序号出现（实测形态见本仓 `TileNodePool.cs` 头注释）。</para>
 // <para><b>自证</b>：`SameAs` 是本值的**纯**比较（不依赖 `Vector3.Equals` 的 epsilon 语义 —— 那会让
-//   "差一点点"判成相等）。离线用例表（含边界：状态全同 / 只差一个字段 / position.z 只差 1e-6）
-//   见 clover-project-diablo2 的 `.ai-tmp/test/tile-equiv/`（本轮实测 12/12 通过）。</para>
+//   "差一点点"判成相等）。离线用例表覆盖边界：状态全同 / 只差一个字段 / position.z 只差 1e-6。</para>
 // <para><b>已知边界 / 精度限制</b>：① 值语义 ⇒ 默认构造（`default(TileRenderState)`）会得到一个
 //   "全 0 状态"（sprite=null / color 全 0 / scale 0 / pos 0 / order 0），它**不是**合法的一格画面
 //   —— 调用方必须走 5 参构造，⛔ 不许用 `default` 当"空状态"占位；② `SameAs` 是**逐位比较**
 //   （`==`），对 NaN 恒 false（NaN != NaN）⇒ 喂 NaN 的坐标会被判"每次都不同"，那是上游算错；
 //   ③ 本类型**只放渲染状态** —— ⛔ 业务字段（tile kind / 块号 / 是否已探索…）不许塞进来，
 //   一旦塞进来，池化路径就会开始"继承上一次的残留业务状态"。</para>
-// <para><b>用法 + 首个消费方</b>：调用方构造一次本值（一格的纯函数），把它交给渲染方；渲染方
-//   **无条件写全** 5 个字段（+ `enabled`）。首个消费方 = `clover-project-diablo2` 的
-//   `Module/Map/MapView.cs`（`GroundState`/`ObjectState`/`FogState` → `ApplyTileState`），
-//   该项目的同名类型已改为**薄转发**到本类型。</para>
+// <para><b>用法</b>：调用方构造一次本值（一格的纯函数），把它交给渲染方；
+//   渲染方**无条件写全** 5 个字段（+ `enabled`）。</para>
 // ─────────────────────────────────────────────────────────────────────────────
 
 using UnityEngine;

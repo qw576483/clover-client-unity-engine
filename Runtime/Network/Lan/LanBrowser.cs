@@ -195,8 +195,8 @@ namespace CloverEngine
             if (State == LanBrowserState.Scanning)
             {
                 // 中断旧轮：旧轮也必须收尾一次（契约见 ILanBrowser.OnScanFinished：
-                // "任何提前结束路径也一定触发一次"）—— 旧实现只 CloseSocket 后翻轮号，
-                // 被中断轮永远不触发收尾，按轮等收尾的业务会永久卡在"扫描中"。
+                // "任何提前结束路径也一定触发一次"）—— 否则被中断轮永远不触发收尾，
+                // 按轮等收尾的业务会永久卡在"扫描中"。
                 // 同步收尾（此刻 _round 尚未自增，轮次守卫放行；FinishRound 内部会关 socket），
                 // 再开新一轮：之后旧轮迟到的收尾会被轮次守卫丢弃。
                 Game.Logger?.Warn(LogTag, $"扫描中再次 Scan：中断第 {_round} 轮，其未完成结果被丢弃");
@@ -275,8 +275,7 @@ namespace CloverEngine
             }
 
             // 跨线程一次性（每轮只准收尾一次）：Stop（主线程）与窗口到点（收包线程）可能几乎同时到达。
-            // 旧实现的 CompareExchange(value: round, comparand: round) 比对数与写入值相同、恒为无操作，
-            // 守卫形同虚设；正确做法：读旧值 → CAS 成功者才算抢到本轮的收尾权。
+            // 读旧值 → CAS 成功者才算抢到本轮的收尾权。
             var prev = Volatile.Read(ref _finishedRound);
             if (prev >= round)
                 return; // 该轮已收尾过（或已翻篇到更新的轮）

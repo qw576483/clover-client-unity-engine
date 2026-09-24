@@ -156,7 +156,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 连接状态的后备字段：msquic 回调线程与调用方线程（Disconnect/Send/看门狗）并发读写，
-        /// 用 volatile 保证可见性 —— 旧实现是普通自动属性，Send 可能读到陈旧状态而误丢帧。
+        /// 用 volatile 保证可见性 —— 否则 Send 可能读到陈旧状态而误丢帧。
         /// </summary>
         private volatile ConnectionState _state = ConnectionState.Disconnected;
 
@@ -186,8 +186,8 @@ namespace CloverEngine
         /// </summary>
         public void ConnectAsync(string addr)
         {
-            // 先校验地址与可用性：二者失败都在动旧连接**之前**同步抛（旧实现先回收句柄再校验，
-            // 传入非法地址时原可用连接已被拆掉且无回滚）。
+            // 先校验地址与可用性：二者失败都在动旧连接**之前**同步抛
+            //（否则传入非法地址时原可用连接已被拆掉且无回滚）。
             if (!NetAddr.TryParse(addr, out var host, out var port))
                 throw new FormatException($"invalid addr: {addr}");
 
@@ -217,8 +217,8 @@ namespace CloverEngine
             if (Failed(status, "ConnectionOpen"))
             {
                 // 早退兜底：该路径不会有 SHUTDOWN_COMPLETE 回调（msquic 没建出连接对象），
-                // GCHandle 与 LiveConnections 登记必须就地回收 —— 否则永久泄漏
-                //（旧实现直接 HandleLinkFailure 走人，只等 SHUTDOWN_COMPLETE 的清理永不发生）。
+                // GCHandle 与 LiveConnections 登记必须就地回收 ——
+                // 只等 SHUTDOWN_COMPLETE 的清理永不发生，否则永久泄漏。
                 CloseHandlesQuietly();
                 HandleLinkFailure(gen, $"ConnectionOpen failed: 0x{status:X8}");
                 return;
@@ -320,8 +320,7 @@ namespace CloverEngine
                 return;
             }
 
-            // 一次分配：直接编码成 [4B 大端长度][客户端帧]，由发送线程原样写出 ——
-            // 旧实现 Send 拷一份 payload、发送线程 Encode 再分配一次（每包两次托管分配）。
+            // 一次分配：直接编码成 [4B 大端长度][客户端帧]，由发送线程原样写出。
             var frame = count > 0
                 ? QuicStreamFraming.EncodeFrom(data, offset, count)
                 : QuicStreamFraming.Encode(Array.Empty<byte>()); // 空体沿用原语义：合法空客户端帧
@@ -539,11 +538,8 @@ namespace CloverEngine
                         //
                         // 代价不是立刻报错，而是**之后关闭连接时原生断言崩溃**：
                         // `Faulting module: msquic.dll`，异常码 0xC0000420（STATUS_ASSERTION_FAILURE），
-                        // 在 Unity 里表现为"编辑器直接消失"（崩了 3 次）。
+                        // 在 Unity 里表现为"编辑器直接消失"。
                         // 这也解释了为什么"只连不发的用例永远不崩"——它根本没收到过流数据。
-                        //
-                        // 真踩过的排查路径（保留给后人）：控制台试验台逐步二分 ⇒ 崩点随"是否收到过数据"变化
-                        // ⇒ 打印 totalLen/copied 发现记账数值本身是对的 ⇒ 才怀疑"这个 API 本就不该在这里调"。
                         lock (_rxGate)
                         {
                             ExtractFrames();
@@ -788,7 +784,7 @@ namespace CloverEngine
                 if (b.Buffer == IntPtr.Zero || b.Length == 0)
                     continue;
 
-                // 复用 scratch（旧实现每个 QUIC_BUFFER 都 new byte[] 一次），再按有效长度段追加 ——
+                // 复用 scratch，再按有效长度段追加 ——
                 // 保留一次中间拷贝（List<byte> 语义所需），但消掉了收包热路径的每包分配。
                 if (_copyScratch.Length < b.Length)
                     _copyScratch = new byte[b.Length];

@@ -70,13 +70,13 @@ namespace CloverEngine
             if (!Game.IsRunning)
             {
                 // 走统一日志门面（此时 Game.Logger 指向 ConsoleLogger，永不 null）：诊断格式与引擎一致，
-                // 不再用裸 Debug.LogError 发散（不进日志文件、与引擎日志格式两张皮）。
+                // ⛔ 不用裸 Debug.LogError（不进日志文件、与引擎日志格式两张皮）。
                 Game.Logger?.Error(LogTag, "引擎尚未启动，请先调用 Game.Launch(config) 再调用 CloverLan.Init()");
                 return;
             }
 
             // 幂等判据用门面（不是静态 bool）：Game.Shutdown 会把 LanBrowser 置空，
-            // 静态 bool 会让「Shutdown → Launch」之后再也挂不上（Game.cs:655-682 的同一教训）。
+            // 静态 bool 会让「Shutdown → Launch」之后再也挂不上。
             if (Game.LanBrowser != null)
             {
                 Game.Logger?.Warn(LogTag, "CloverLan.Init 重复调用，忽略（Game.LanBrowser 已挂接）");

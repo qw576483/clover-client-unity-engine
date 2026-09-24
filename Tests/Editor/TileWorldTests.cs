@@ -6,7 +6,7 @@ namespace CloverEngine.Tests
     /// <summary>
     /// <see cref="TileWorld"/>（<see cref="ITileWorld"/> 默认实现）的单元测试。
     /// <para>
-    /// 重点判三类：① 稀疏键**不碰撞**（含 super-mario 32 位键会碰撞的具体坐标对）；
+    /// 重点判三类：① 稀疏键**不碰撞**（含 32 位键会碰撞的具体坐标对）；
     /// ② 世界→格用 FloorToInt（负数坐标）；③ 边界 / 托台 / Clear 的语义（Clear 不动边界）。
     /// </para>
     /// </summary>
@@ -49,7 +49,7 @@ namespace CloverEngine.Tests
         }
 
         /// <summary>
-        /// 64 位压缩键是双射：super-mario 的 `(tx &lt;&lt; 16) ^ (ty + 512)` 会把 (1, 65024) 与 (0, -512)
+        /// 64 位压缩键是双射：32 位键方案 `(tx &lt;&lt; 16) ^ (ty + 512)` 会把 (1, 65024) 与 (0, -512)
         /// 映射到同一个键（= 误判实心），本实现必须区分开。
         /// </summary>
         [Test]

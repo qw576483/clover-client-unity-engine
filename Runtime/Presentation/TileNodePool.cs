@@ -1,7 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Presentation/TileNodePool.cs
-// **SpriteRenderer 瓦片节点池**：逐格渲染节点的"借 / 还 / 清"，通用底座，从
-// clover-project-diablo2 下沉（该项目的同名类型已改为薄转发到本类）。
+// **SpriteRenderer 瓦片节点池**：逐格渲染节点的"借 / 还 / 清"，通用底座。
 //
 // ⛔ 为什么这是**新件**、而不是扩展同目录的 `ObjectPool`（判据）：
 //   `ObjectPool`（Runtime/Presentation/ObjectPool.cs）是**GameObject 级**池：key 寻址
@@ -18,7 +17,7 @@
 //   的资源池根 vs 随场景销毁的地图层根）。⇒ 另起一件（判据 = 这两条：GameObject 池 vs
 //   渲染状态值 + 无条件写全）。
 //
-// 三条硬规矩（逐字沿用原实现，⛔ 未改语义）：
+// 三条硬规矩（⛔ 未改语义）：
 //   ① **只有 `Take` 会把节点真建出来**（`new GameObject` + 挂 `SpriteRenderer`）⇒「复用」与「新建」
 //      走同一条路，调用方拿到的节点一律由它自己把渲染字段写全 ⇒ 画面逐项相等；
 //   ② 归还 = `SetActive(false)` + 挂回池根（**不销毁**）⇒ 块根被销毁时不会连带销毁它们；
@@ -26,32 +25,25 @@
 //      `activeSelf=false` 的子节点 —— 少这一步，池化过的瓦片会永远不可见且不报错）。
 //   ③ 池里可能残留**已被场景卸载销毁**的空引用（Unity 的 `==` 重载判 null）⇒ `Take` 跳过它们。
 //
-// 出处（逐字搬运，⛔ 未改数值与分支）：
-//   clover-project-diablo2 · client/Assets/Scripts/Module/Map/TileNodePool.cs:26-125
-//   （★ T0FIX-A 引入，首个消费方 = 同项目 `Module/Map/MapView.cs` 的 `EnsurePool`/`NewTile`/`Return`。）
-//
-// <para><b>最小复现</b>：整图重铺（Town 56×40 ≈ 2000+ 节点、洞穴最坏 ≈ 9000）单帧
-//   46.3~73.9 ms（≫ 16.67 ms 一帧预算）—— 因为旧口径每格 `Destroy` + `new GameObject`；
+// <para><b>预算依据</b>：整图重铺（Town 56×40 ≈ 2000+ 节点、洞穴最坏 ≈ 9000）单帧
+//   46.3~73.9 ms（≫ 16.67 ms 一帧预算）—— 逐格建节点就是开销大头；
 //   第二次及以后的整图重铺（贴图流式到位 / 迷雾开关）**新建数应为 0**（池里全部复用）。</para>
 // <para><b>自证</b>：① 纯函数 `SplitDemand(free, demand)` 的算术 —— 池够 ⇒ 新建 0、池不够 ⇒
-//   只补差额、无需求 ⇒ 什么都不取（离线用例表在 clover-project-diablo2 的
-//   `.ai-tmp/test/tile-equiv/`，本轮实测通过）；② `Take`/`Return` 的 `SetActive` 严格配对
+//   只补差额、无需求 ⇒ 什么都不取（离线用例表覆盖这三种）；② `Take`/`Return` 的 `SetActive` 严格配对
 //   （结构断言：取出即 `SetActive(true)` / 归还即 `SetActive(false)`，各恰 1 次）；
 //   ③ 离线宿主的池行为计数器（`CreatedCount` / `ReusedCount` / `FreeCount`）在一次重铺前后一致。</para>
 // <para><b>已知边界 / 精度限制</b>：① 计数**只增不减**（进程内累计自证量）：`Clear()` 真销毁池内
 //   空闲节点但**不清零计数** ⇒ 语义是"本次进程累计新建/复用了几次"，⛔ 不要拿它当"池里现在几个"；
 //   "现在几个"看 `FreeCount`；② `Return` 允许重复归还（会把同一节点压两次栈）—— 本池**不查重**
-//   （查重要维护 `HashSet`，而调用方 `MapView` 的归还路径是"遍历块内子节点逐个归还"，天然不重复）；
+//   （查重要维护 `HashSet`，而调用方的归还路径是"遍历块内子节点逐个归还"，天然不重复）；
 //   重复归还的后果是 `FreeCount` 偏大 + `Take` 可能拿到同一节点两次 ⇒ 上游**必须**保证配对；
 //   ③ `Clear()` 只销毁**空闲**节点，**不影响已取出的节点**（那些由调用方的层级负责销毁）；
 //   ④ 池内节点一律 `inactive`、取出的一律 `active`（逐次配对）；⛔ 不要把节点"借用后长期不还"——
 //   那是调用方的生命周期问题，本池不做超时回收（`ObjectPool` 的 `IdleExpirySeconds` 是给
 //   资源实例用的，逐格节点不需要也不该有超时）。</para>
-// <para><b>用法 + 首个消费方</b>：`var pool = new TileNodePool(rootTransform);` →
-//   `Take(parent)` 取（取出即可见，渲染字段由调用方写全）→ 用完 `Return(sr)` → 退场 `Clear()`。
-//   首个消费方 = `clover-project-diablo2` 的 `Module/Map/MapView.cs`（`EnsurePool` 建池、
-//   `NewTile` 取、`ReturnTiles` 还、`Clear` 退场），业务还要接的线 = 该项目的 mapcheck 宿主
-//   （结构断言 + 池化收益算术）。</para>
+// <para><b>用法</b>：`var pool = new TileNodePool(rootTransform);`
+//   → `Take(parent)` 取（取出即可见，渲染字段由调用方写全）→ 用完 `Return(sr)` → 退场 `Clear()`；
+//   离线宿主可做结构断言 + 池化收益算术。</para>
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System.Collections.Generic;

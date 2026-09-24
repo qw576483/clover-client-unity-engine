@@ -26,7 +26,7 @@ namespace CloverEngine
             if (!Game.IsRunning)
             {
                 // 走 Game.Logger：它**永不为 null**（未 Launch 时指向 ConsoleLogger，同样写 Unity Console
-                // 且格式与文件日志一致），换成落盘 Logger 后本诊断也能进日志文件——裸 Debug.LogError 不能。
+                // 且格式与文件日志一致），本诊断也能进日志文件 —— 裸 Debug.LogError 不能。
                 Game.Logger?.Error("Network", "CloverNet.Init: game not launched, call Game.Launch first");
                 return;
             }

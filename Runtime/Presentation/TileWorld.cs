@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Presentation/TileWorld.cs
-// 2D 瓦片世界的**空间事实面**：实心格位图 + 移动托台的小数顶高 + 世界边界。通用底座，下沉到引擎。
+// 2D 瓦片世界的**空间事实面**：实心格位图 + 移动托台的小数顶高 + 世界边界。通用底座。
 //
 // 口径（与 Runtime/Presentation/Map.cs:14-15 **逐字一致**，⛔ 不许在这里长第二套）：
 //   ★ 本接口**只回答空间事实**（这一格实不实心 / 托台顶在哪 / 世界到哪为止）。
@@ -8,12 +8,6 @@
 //     都是玩法手感，业务拿这里的事实自己写。
 //   ⛔ 所以本接口**没有** `Move()` / `Step()` / `Resolve()` 之类方法 —— 加了就是把玩法塞进引擎，
 //     两个项目会开始互相打架（一个要滑、一个要停）。
-//
-// 出处：从 clover-project-super-mario 的关卡实现收敛而来 ——
-//   · Module/Level/LevelModule.cs:181-207：实心位图 `HashSet<int>` + 移动托台 `Dictionary<int,float>`
-//     + `Key(tx,ty)` 压缩键 + `IsSolidTile` / `SetSolid` / `SetCarrier` / `ClearCarrier` / `TryGetCarrierTop`；
-//   · 同文件 209-215：`IsSolidAt(float,float)`（世界 → 格用 `Mathf.FloorToInt`，注释里写着
-//     "必须用 FloorToInt 而不是 (int)：负数坐标下 (int) 向零取整，会让 x=-0.5 落到第 0 格"）。
 //
 // ★ 为什么服务端 `CloverMap V1` 托不住 2D 语义（所以这里必须另起一个接口，而不是塞进 `IMapData`）：
 //   引擎的 `IMapData` / `CloverMapFormat` 是 **3D MMO 单层平地** —— 查询签名就是
@@ -24,7 +18,7 @@
 // 存储：两个哈希表 —— 实心 <c>HashSet&lt;long&gt;</c>、托台 <c>Dictionary&lt;long,float&gt;</c>，
 //   键 = `((long)tx &lt;&lt; 32) | (uint)ty`（高 32 位 tx、低 32 位 ty，**双射**、不会碰撞）。
 //   · 稀疏地图（典型 2D 关卡实心格 ~10^3）远小于 `bool[w*d]` 二维数组；
-//   · ⛔ **不沿用** super-mario 的 `(tx &lt;&lt; 16) ^ (ty + 512)`（LevelModule.cs:194）：32 位键在
+//   · ⛔ 键**不用** 32 位写法 `(tx &lt;&lt; 16) ^ (ty + 512)`：32 位键在
 //     `|tx| ≥ 2^15`（`tx &lt;&lt; 16` 溢出）或 ty 超出 [-512, 65022] 时会**键碰撞** ⇒ 误判实心
 //     （"明明没有砖却撞上了"，且不报错）。64 位键每键 8 字节，换掉一类不可诊断的 bug。
 // ─────────────────────────────────────────────────────────────────────────────
@@ -104,7 +98,7 @@ namespace CloverEngine
     }
 
     /// <summary>
-    /// <see cref="ITileWorld"/> 的默认实现：两个哈希表 + 64 位压缩键（口径与出处见文件头）。
+    /// <see cref="ITileWorld"/> 的默认实现：两个哈希表 + 64 位压缩键（口径见文件头）。
     /// <para>纯数据，无 MonoBehaviour、无 GameObject；<see cref="TryGetCarrierTop"/> 等查询不产生日志。</para>
     /// </summary>
     public sealed class TileWorld : ITileWorld

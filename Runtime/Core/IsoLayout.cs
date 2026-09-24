@@ -1,15 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/IsoLayout.cs
-// 等距（isometric）投影的正/逆变换、深度排序、屏幕取格、格间距与 8 方向 —— 通用底座，下沉到引擎。
+// 等距（isometric）投影的正/逆变换、深度排序、屏幕取格、格间距与 8 方向 —— 通用底座。
 //
-// 出处：Diablo2 项目 `client/Assets/Scripts/Core/Iso.cs`（191 行，**算法与边界处理逐行照搬**）。
-//   两处改写，语义不变：
-//     ① 原来是 `static class` + 读项目常量 `GameConst.IsoHalfW/IsoHalfH/SortOrderStep/SortOrderBase`
-//        ⇒ 现为**实例类**，那四个值由构造参数传入（页面/项目各自给一组即可复用）。
-//     ② 日志出口 `Log.WarnThrottled` ⇒ 引擎 `LogThrottle.WarnThrottled`（同源实现，见 Runtime/Core/LogThrottle.cs）。
-//   ⛔ 层偏移（`GameConst.LayerOffset*`）**没有**下沉：它属项目语义，由项目门面在返回值上叠加。
+//   半格尺寸 / 深度排序步长由**构造参数**传入（页面 / 项目各自给一组即可复用），引擎不预设项目常量。
+//   ⛔ 层偏移（渲染层的 z 偏移）**不属本件**：它属项目语义，由调用方在返回值上叠加。
 //
-// 坐标口径（原样保留）：
+// 坐标口径：
 //   逻辑坐标 = 格子坐标（整数格，`Vector2Int`）；渲染时才做等距投影。
 //   格子 (gx, gy) 覆盖逻辑方形 [gx, gx+1] × [gy, gy+1]，**中心** = (gx+0.5, gy+0.5)
 //
@@ -169,8 +165,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 格增量 → 8 方向朝向（**格空间增量 → 屏幕上的朝向**；与 <see cref="Dir8"/> 的顺时针编号一致）。
-        /// <para>**权威表**（由本文件的 <see cref="GridToWorld"/> 直接反算，逐条与 Diablo2 参考实现
-        /// Diablerie `Iso.Direction(pos, target, 8)` 一致）：</para>
+        /// <para>**权威表**（由本文件的 <see cref="GridToWorld"/> 直接反算）：</para>
         /// <code>
         ///   ( 0, +1) → SW   世界位移 (−HalfW, −HalfH) ⇒ 屏幕左下
         ///   ( 0, -1) → NE   屏幕右上
@@ -184,10 +179,9 @@ namespace CloverEngine
         /// <para>推导：`GridToWorld` 是 `x = (gx − gy)·HalfW`、`y = −(gx + gy + 1)·HalfH`
         /// ⇒ `Δworld = ( (Δgx − Δgy)·HalfW , −(Δgx + Δgy)·HalfH )`。
         /// 所以 `(0, +1)` 是**屏幕左下 = SW**，`(+1, +1)` 才是**屏幕正下 = S**。</para>
-        /// <para>⛔ **本表曾被整档逆时针偏 45°**：旧实现把 `(0,+1)` 返回 `S`、`(+1,+1)` 返回 `SE`…
-        /// —— 结果是「人物朝向看着不对」：格增量算出的朝向比真实屏幕朝向**少一档**，
-        /// 再叠加素材（`.dcc` 8 向图）就是整体错位，且**不报错、不打日志**。
-        /// 自洽判据：`DirectionDelta(DirectionTo(delta))` 必须与 `delta` 的**符号方向一致**。</para>
+        /// <para>自洽判据：`DirectionDelta(DirectionTo(delta))` 必须与 `delta` 的**符号方向一致**
+        /// —— ⛔ 整档偏转会让人物朝向"看着不对"：格增量算出的朝向比真实屏幕朝向**少一档**，
+        /// 再叠加素材（`.dcc` 8 向图）就是整体错位，且**不报错、不打日志**。</para>
         /// <para>增量取符号后比较，故 (3, 7) 与 (1, 1) 结果相同。</para>
         /// </summary>
         public Dir8 DirectionTo(Vector2Int delta)

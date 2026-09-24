@@ -5,7 +5,7 @@ using UnityEngine.SceneManagement;
 
 namespace CloverEngine
 {
-    // 契约（ISceneManager）已下沉到 Runtime/Core/PresentationContracts.cs（Game 门面在 Core）。
+    // 契约（ISceneManager）见 Runtime/Core/PresentationContracts.cs（Game 门面在 Core）。
 
     /// <summary>
     /// 场景管理器实现：异步加载/卸载 + 加载门控 + 场景级清理。
@@ -153,7 +153,7 @@ namespace CloverEngine
             Game.Entity?.DestroyGroup(sceneName);
             Game.Pool?.ClearGroup(sceneName);
             // 清掉可能仍在跑的加载进度定时器（正常会在 progress>=0.9 时自停；场景被提前销毁 /
-            // 加载中断时靠这里兜住）。用 id 停，不再依赖固定名。
+            // 加载中断时靠这里兜住）。按 id 停（不按固定名找）。
             Game.Timer?.Stop(_progressTimerId);
             _progressTimerId = 0;
             // 场景级定时器批量回收（ISceneManager 的承诺：scope=场景名的定时器随场景卸载清理）。

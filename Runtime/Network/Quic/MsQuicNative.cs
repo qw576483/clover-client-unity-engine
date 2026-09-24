@@ -362,7 +362,7 @@ namespace CloverEngine
         /// StreamSend。**缓冲描述符按指针传**（不是 <c>ref</c>）：msquic 的发送是异步的，
         /// 它保存的是我们给的 <c>QUIC_BUFFER*</c>，直到 SEND_COMPLETE 才会读。
         /// 传 <c>ref</c>（= 指向托管栈帧的指针）会在方法返回后失效，msquic 读到的是垃圾 ——
-        /// 表现为"服务端把长度读成天文数字然后断开"（真踩过）。故调用方必须传**原生堆**上的描述符。
+        /// 表现为"服务端把长度读成天文数字然后断开"。故调用方必须传**原生堆**上的描述符。
         /// </summary>
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         public delegate uint StreamSendFn(IntPtr stream, IntPtr buffers, uint bufferCount, uint flags, IntPtr clientContext);

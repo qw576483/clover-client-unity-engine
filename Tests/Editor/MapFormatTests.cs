@@ -349,7 +349,7 @@ namespace CloverEngine.Tests
         }
 
         /// <summary>
-        /// 高度场位（FlagHeightField）**本轮仍然被明确拒绝**：V1 解码器不认识它的布局，
+        /// 高度场位（FlagHeightField）**仍然被明确拒绝**：V1 解码器不认识它的布局，
         /// 放行会把高度段误读成位图。多层地图的替代路是烘焙层过滤（逐层各烘一份），真高度场列 V2。
         /// </summary>
         [Test]

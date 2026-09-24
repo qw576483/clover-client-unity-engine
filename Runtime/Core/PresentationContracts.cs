@@ -89,8 +89,8 @@ namespace CloverEngine
         /// <param name="riseWorld">
         /// 升距，单位 = <b>世界单位</b>（沿世界 +Y 方向的位移，由相机投影换算成屏幕位移）。
         /// <para>
-        /// <c>0</c>（默认）= <b>沿用本次下沉前的屏幕升距</b>（屏幕向上 70 画布单位，与相机距离无关）
-        /// —— 默认值下与旧行为逐字一致。
+        /// <c>0</c>（默认）= <b>沿用屏幕升距</b>（屏幕向上 70 画布单位，与相机距离无关），
+        /// 即不传该参数时的对外行为。
         /// </para>
         /// <para>
         /// 为什么要有它：这类飘字的上移距离在**原版里是关卡尺度意义上的**（"上移 3 格"），
@@ -106,7 +106,7 @@ namespace CloverEngine
         /// </para>
         /// </param>
         /// <param name="fade">
-        /// 是否在存活期内淡出。<b>默认 <c>true</c> = 本次下沉前的行为</b>（alpha 按 <c>1 - t²</c> 递减）。
+        /// 是否在存活期内淡出。<b>默认 <c>true</c></b>（alpha 按 <c>1 - t²</c> 递减）。
         /// 传 <c>false</c> = 全程不透明，到点直接隐藏（复用节点时已复位 alpha，不留残影）。
         /// <para>
         /// 用于"原版不淡出"的飘字（例如分数飘字：0.5s 直线上升、动画剪辑里没有 alpha 曲线）。
@@ -133,8 +133,7 @@ namespace CloverEngine
         /// </para>
         /// <para>
         /// <b>为什么要有它</b>：只有"转圈 + 文案"的 Loading 显示不了真进度（例如
-        /// <see cref="ISceneManager.Load"/> 的 <c>progress</c> 回调），业务只能自建一个带 <c>SetProgress</c>
-        /// 的面板 —— 参考实现（`clr-project-cr` 的 `UI/Panels/LoadingPanel.cs`）就是这么自建出来的。
+        /// <see cref="ISceneManager.Load"/> 的 <c>progress</c> 回调），业务只能自建一个带 <c>SetProgress</c> 的面板。
         /// </para>
         /// </summary>
         /// <param name="text">文案；空 / null = 沿用上一次的文案（与 <see cref="ShowLoading(string)"/> 同口径）。</param>
@@ -406,7 +405,7 @@ namespace CloverEngine
         /// </para>
         /// <para>
         /// ⚠️ 计数口径 = **真正起播**的那一帧（异步加载晚到的音效算在它响的那一帧），不是"被请求"的那一帧。
-        /// 默认 <c>0</c> 时**与不设闸门逐字一致** —— 改默认值会悄悄改掉所有项目的表现，⛔ 不许改。
+        /// 默认 <c>0</c> = **不设闸门**（改默认值会悄悄改掉所有项目的表现，⛔ 不许改）。
         /// </para>
         /// </summary>
         int MaxPlaysPerFrame { get; set; }
@@ -530,11 +529,10 @@ namespace CloverEngine
     // ────────────────────────── Quality ──────────────────────────
     //
     // 命名说明：这一族管的是**画质与性能档位**（分辨率缩放 / 阴影 / LOD / 帧率），
-    // 历史上叫 Device*（Game.Device / DeviceLevel / IDeviceManager），容易与
-    // 「设备唯一标识」（Game.DeviceId）混淆——两者毫无关系：
+    // 命名一律用 Quality*，⛔ **不要用 Device\*** —— 容易与「设备唯一标识」（Game.DeviceId）
+    // 混淆，两者毫无关系：
     //   - 本族：这台机器**跑得动多好的画质**（可随时改，不涉及身份）
     //   - DeviceId：这台机器**是谁**（稳定标识，用于账号 / 房间寻址）
-    // 故统一更名为 Quality*。
 
     /// <summary>
     /// 画质档位，用于选择对应的质量配置预设
@@ -609,9 +607,8 @@ namespace CloverEngine
         /// <para>
         /// <b>为什么必须有</b>：只有 <see cref="OnLevelChanged"/> 时订阅者**无法注销** —— 委托链只增不减，
         /// 业务侧"只挂一次"只能自己记一个 bool 标志，而面板 / 场景重开、域重载等路径上旧订阅者仍被
-        /// 引擎持有（老实例一直收回调 = 泄漏 + 幽灵行为）。参考实现（`clr-project-cr` 的
-        /// `Module/Settings/SettingsManager.cs` 的 `_qualityHooked` 一次性钩子）正是被这个缺口逼出来的写法；
-        /// 它只防住了"重复订阅"，防不住"该退订时退不掉"。
+        /// 引擎持有（老实例一直收回调 = 泄漏 + 幽灵行为）；那种标志只防住了"重复订阅"，
+        /// 防不住"该退订时退不掉"。
         /// </para>
         /// <para>
         /// 命名沿用引擎既有的 <c>On*</c> / <c>Off*</c> 对偶（<see cref="IRouter.OnMsg"/> /

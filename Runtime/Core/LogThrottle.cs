@@ -1,30 +1,24 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/LogThrottle.cs
-// 日志防刷屏：限频 / 只报一次 / 可注入时钟 / Unity 时钟不可用时自动降级 —— 通用横切能力，下沉到引擎。
+// 日志防刷屏：限频 / 只报一次 / 可注入时钟 / Unity 时钟不可用时自动降级 —— 通用横切能力。
 //
-// 出处：Diablo2 项目 `client/Assets/Scripts/Core/Log.cs`（247 行）里的**降频与时钟那一段**：
-//   `WarnThrottled` / `ErrorThrottled` / `WarnOnce` / `ErrorOnce` / `ShouldLog` / `Now` /
-//   `CreateProcessClock` / `ResetThrottle`（下沉后改名 `Reset`，语义不变）。语义逐条照搬。
-//
-// ⛔ **没有下沉**（那是项目专属，不属于引擎）：
+// ⛔ **不属本件**（项目专属）：
 //   · `KnownTags` tag 白名单与 `Normalize(tag)` —— 项目用它保证验收脚本能按 `[tag]` 检索日志，
 //     合法 tag 集是每个项目自己的约定，引擎不该替项目判定。
 //   · 基础转发 `Info` / `Warn` / `Error` / `Debug` —— 引擎已有 `Game.Logger`（`ILogger`），
 //     本类**只**提供「降频闸门 + 时钟」，不做第二套日志门面。
-//   · 计数口径那边的 `CsModuleLog.Always(msg)`（"不降频直发一条 Info"）—— 它等价于
-//     `Game.Logger.Info(tag, msg)`，再包一层转发方法只是别名（§4.4：已有同类能力不准再起第二套）。
-//   · `CsModuleLog` 这个 per-tag 薄适配类本身 —— tag 由每个调用方自己传，引擎不该替业务持有 tag。
+//   · "不降频直发一条 Info"这类方法 —— 它等价于 `Game.Logger.Info(tag, msg)`，再包一层转发
+//     方法只是别名（§4.4：已有同类能力不准再起第二套）。
+//   · per-tag 薄适配类本身 —— tag 由每个调用方自己传，引擎不该替业务持有 tag。
 //
-// S1 计数口径出处：clover-project-cs16 的 client/Assets/Scripts/Module/Player/CsModuleLog.cs（78 行）
-//   —— 那个文件是「每 key 计数」口径（**第 1 次必打**，之后每 N 次打一条，第 1 次之后行尾补
-//   `（同类第 N 次）`，空 key 归并 `"default"`）。本类把它**整体**沉为
-//   `ShouldLogEvery` / `InfoCounted` / `WarnCounted` / `ErrorCounted`，项目侧只留一个
-//   per-tag 薄适配（转发）。出处文件里的 `LogRateEvery`（= 50）是**业务侧数值**，
-//   留在项目 `CsCombatTuning` 并通过参数传入，⛔ 不进引擎。
+// 计数口径：**第 1 次必打**，之后每 N 次打一条，第 1 次之后行尾补 `（同类第 N 次）`，
+//   空 key 归并 `"default"`。本类把它实现为
+//   `ShouldLogEvery` / `InfoCounted` / `WarnCounted` / `ErrorCounted`，per-tag 薄适配（转发）留给调用方。
+//   计数间隔是**业务侧数值**（默认 50），由调用方通过参数传入，⛔ 不进引擎。
 //
-// 为什么下沉：高频回调（每帧寻路失败 / 素材缺失 / 每帧碰撞失败）裸打日志会把日志文件打爆，
-//   限频是任何项目都要的底座；同源注释记录了代价 —— 时钟不可用时曾迫使多个离线宿主各自手写
-//   一套降频。收敛到引擎后，新项目不必再踩一次（也是 `patterns/engine-fix.md` §7 的 D 桶判定）。
+// ★ 通用性依据：高频回调（每帧寻路失败 / 素材缺失 / 每帧碰撞失败）裸打日志会把日志文件打爆，
+//   限频是任何项目都要的底座（时钟不可用时需有统一的降级口径，也是
+//   `patterns/engine-fix.md` §7 的 D 桶判定）。
 //
 // 语义约束（改一条 = 语义漂移）：
 //   ① 时钟三级，**永不抛异常**：已注入 <see cref="Clock"/> ⇒ 用它；否则 `Time.realtimeSinceStartup`
@@ -178,7 +172,7 @@ namespace CloverEngine
         }
 
         // ── 计数闸门（S1 计数口径：每 key 计数，第 1 次 + 之后每 N 次）─────────────────
-        /// <summary><c>everyN</c> 缺省值：与项目侧 `CsCombatTuning.LogRateEvery` = 50 同值（业务可另传）。</summary>
+        /// <summary><c>everyN</c> 缺省值 = 50（业务可另传）。</summary>
         private const int DefaultEveryN = 50;
 
         /// <summary>计数口径里空 / <c>null</c> key 的归并名（⛔ 与 <see cref="ShouldLog"/> 的空 key 语义刻意不同）。</summary>

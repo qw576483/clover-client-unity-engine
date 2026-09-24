@@ -1,15 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine.Editor · SceneScaffold —— 「最小可运行场景」脚手架（编辑器横切）
 //
-// 【出处】下沉自 `clover-project-diablo2` 的 `client/Assets/Editor/ProjectBuilder.cs`：
-//   `:137-169` 命令行入口（`-executeMethod` + 失败 Exit(1)）、`:174-203` 启动自愈体检、
-//   `:356-516` 生成最小场景（相机 / 2D 灯光 / 命名根节点 / 入口脚本）、
-//   `:542-587` 幂等写 Build Settings、`:589-628` 设 Play 起始场景、`:630-690` 反射解析业务类型。
-//   （面板空壳预制体那半**不在本件** —— 引擎已有 `Editor/PanelPrefabBuilder.cs`。）
+// 【范围】本件覆盖「最小可运行场景」全套：命令行入口（`-executeMethod` + 失败 Exit(1)）、
+//   启动自愈体检、生成最小场景（相机 / 2D 灯光 / 命名根节点 / 入口脚本）、
+//   幂等写 Build Settings、设 Play 起始场景、按名字反射解析入口类型。
+//   面板空壳预制体那半**不在本件** —— 引擎已有 `Editor/PanelPrefabBuilder.cs`。
 //
-// 【为什么下沉】「造一个能跑的最小场景 + 把它写进 Build Settings + 设成 Play 起始场景」
-//   是**每个工程开工都要写一遍**的活；引擎此前只有预制体生成器（`PanelPrefabBuilder`）与
-//   「打开时打开启动场景」（`EditorStartScene`），偏偏缺这三步。
+// 【通用性依据】「造一个能跑的最小场景 + 把它写进 Build Settings + 设成 Play 起始场景」
+//   是**每个工程开工都要写一遍**的活 —— 引擎既有件只有预制体生成器（`PanelPrefabBuilder`）
+//   与「打开时打开启动场景」（`EditorStartScene`），这三步没有件负责。
 //
 // 【用法】
 //   代码：`SceneScaffold.Create("Assets/Scenes/Boot.unity", new SceneScaffoldOptions{...}, out var err)`
@@ -19,7 +18,6 @@
 // 【已知边界】⛔ 不写任何业务取值：场景名 / 相机参数 / 根节点名 / 入口类型全部由调用方给。
 //   ⛔ 2D 灯光（URP `Light2D`）**用反射可选接入** —— Editor 程序集只引用引擎自己的程序集，
 //   硬引用 URP 会让没装 URP 的工程编不过；拿不到类型就跳过并留一行日志。
-//   ⛔ 本件是引擎新增件，项目侧 `ProjectBuilder.cs` 的接线**尚未做**（其现有实现保持可用）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System;

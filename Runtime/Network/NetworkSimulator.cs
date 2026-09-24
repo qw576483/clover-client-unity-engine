@@ -283,8 +283,8 @@ namespace CloverEngine
             }
 
             // 延迟发送必须拷贝：调用方的缓冲区可能在返回后被复用。
-            // 所有帧（含零延迟）都经同一队列由单一泵按入队顺序写出 —— 旧实现逐帧独立
-            // Task.Run + Task.Delay，后发的帧可能先写出（在 TCP 等可靠线路上造成应用层乱序），
+            // 所有帧（含零延迟）都经同一队列由单一泵按入队顺序写出 —— 否则逐帧独立
+            // Task.Run + Task.Delay 会让后发的帧可能先写出（在 TCP 等可靠线路上造成应用层乱序），
             // 且该 Task 不被跟踪，Disconnect 清空后仍会向已关闭的内层传输写入。
             var copy = new byte[count];
             Buffer.BlockCopy(data, offset, copy, 0, count);

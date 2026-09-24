@@ -126,9 +126,7 @@ namespace CloverEngine
         private volatile bool _abandoned;
 
         // 下面几个字段【只由写线程访问】：日期判定与文件句柄都不跨线程共享。
-        // 旧实现让调用方（Log）先把 _currentDate 改成新日期再唤醒写线程，写线程据此判定"日期没变、无需切文件"，
-        // 结果跨天永不切文件、日志一直追加进首日文件；且首次进入时 _currentDate 还是 null，
-        // 会拼出 ".log" 这种无名文件。现在日期归属写线程自己，跨天必然重建。
+        // 日期归属写线程自己，跨天必然重建（若由调用方提前改写日期，写线程会判定"日期没变、无需切文件"）。
         private string _currentDate;
         /// <summary>已经报过错的日期：同一天重复打开失败只报一次，避免刷屏。</summary>
         private string _rotateFailedDate;
@@ -248,8 +246,7 @@ namespace CloverEngine
         {
             if (level < _level) return;
 
-            // 只取一次时间：旧实现取了两次（行内时间戳一次、日期一次），跨天边界上两处可能对不上；
-            // 这里一次取值同时用于时间戳与（写线程侧的）日期判定。
+            // 只取一次时间：同时用于时间戳与（写线程侧的）日期判定，避免跨天边界上两处对不上。
             var now = DateTime.Now;
             var line = ConsoleLogger.FormatLine(now, level, tag, msg, ex);
 
@@ -365,8 +362,7 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 跨天切文件。文件名<b>始终</b>是 <c>YYYY-MM-DD.log</c>：旧实现用还没赋值的 _currentDate 拼路径，
-        /// 首日会建出 ".log" 这种无名文件，之后又因日期已被调用方提前改写而永不切换。
+        /// 跨天切文件。文件名<b>始终</b>是 <c>YYYY-MM-DD.log</c>，按本次写入的日期（<paramref name="today"/>）重建。
         /// </summary>
         private void RotateIfNeeded(string today)
         {
@@ -452,9 +448,8 @@ namespace CloverEngine
         /// 释放日志系统资源，停止后台写入线程并刷新剩余日志。
         /// <para>
         /// 安全收尾：先置 <c>_running=false</c> 并唤醒线程，再 Join。
-        /// <b>Join 超时后绝不 Dispose 写线程正在用的对象</b>（旧实现超时后照样 Dispose StreamWriter /
-        /// 等待句柄，写线程随即抛 ObjectDisposedException、最后一批日志丢失）——
-        /// 此时置 <c>_abandoned</c>，由写线程自己在收尾里关闭文件。
+        /// <b>Join 超时后绝不 Dispose 写线程正在用的对象</b>（否则写线程随即抛 ObjectDisposedException、
+        /// 最后一批日志丢失）—— 此时置 <c>_abandoned</c>，由写线程自己在收尾里关闭文件。
         /// </para>
         /// </summary>
         public void Dispose()

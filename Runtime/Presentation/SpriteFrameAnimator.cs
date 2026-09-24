@@ -1,23 +1,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Presentation/SpriteFrameAnimator.cs
-// 轻量逐帧动画器：帧表（Sprite[]）→ SpriteRenderer，**由业务 Tick 驱动**。通用底座，下沉到引擎。
+// 轻量逐帧动画器：帧表（Sprite[]）→ SpriteRenderer，**由业务 Tick 驱动**。通用底座。
 //
-// 出处：clover-project-super-mario 里至少 5 处**逐字相同**的手写帧推进 ——
+// 为什么要有本件：手写的「计时 → 换帧」在多处重复（同一形状的写法散落各处，节奏常量也在调用方手里）——
 //   `_animTimer += dt; if (_animTimer >= 0.11f) { _animTimer = 0f; _frame = (_frame + 1) % _frames.Count;
 //    sr.sprite = _frames[_frame]; }`：
-//     · Module/Entities/ItemModule.cs:343 金币 0.11s/帧 · :513 星星 0.09 · :603 0.08 · :663 0.06
-//     · Module/Entities/FireballModule.cs:225 火球 0.06
-//   另有 3 处同型"计时 → 换 Sprite"手写（EnemyModule.cs:237-243 Goomba 翻转 / :483-492 乌龟两帧 /
-//   :894-900 食人花两帧，0.18 / 0.16 / 0.22s）—— 节奏常量散落在各个 MonoBehaviour 里，切帧逻辑一式多份。
-//   ⇒ 收敛成本类：帧表 + fps 给一次，切帧只有一份实现。
+//   ⇒ 本件：帧表 + fps 给一次，切帧只有一份实现。
 //
 // ★ 为什么**不**用 AnimatorController（引擎现成的 `IAnimationManager`）：
 //   · `IAnimationManager.CreateAnimator(GameObject, RuntimeAnimatorController)`
 //     （Runtime/Core/PresentationContracts.cs:277-285）落地的是一颗 `Animator` + 编辑器里编好的
 //     controller 资产（Runtime/Presentation/Animation.cs:14-23：`animator.runtimeAnimatorController = controller`），
 //     它回答的是"播哪个 state / 设哪个参数"（`IAnimPlayer.Play(stateName)`）——**要**在编辑器里建 State/Clip；
-//   · 平台游戏要的是「帧列表直接切 `SpriteRenderer.sprite`」：每套动画的节奏就是**一个 fps**
-//     （0.06~0.22 s/帧，见上），没有状态机、没有混合、没有 Avatar。为 4 张图建 controller + clip
+//   · 平台游戏要的是「帧列表直接切 `SpriteRenderer.sprite`」：每套动画的节奏就是**一个 fps**，
+//     没有状态机、没有混合、没有 Avatar。为 4 张图建 controller + clip
 //     是纯负担；而帧序列本来就来自图集/条带（`Game.Res.LoadAll<Sprite>(path)`，
 //     Runtime/Core/Contracts.cs:1107-1124 —— 逐个帧名 LoadAsset 取不到），天然是"一组 Sprite"。
 //   · 所以本类**不引入** Animator / AnimatorController：Sprite 数组进，SpriteRenderer 出。
@@ -42,20 +38,17 @@
 //   · `PlayOnce` 的完成回调抛异常 ⇒ 接住并 Error 留痕，**不打断**调用方的 Tick 链；回调只触发一次；
 //   · 单次 `Advance` 推进步数有上限（防"超大 dt / 长时间没 Tick"把一帧卡成死循环）。
 //
-// ★ 2026-09-24 新增三条语义（**只加在重载上，旧签名语义逐字不变**）—— 出处 = `clr-project-cr`
-//   `client/Assets/Scripts/View/UnitView.cs`（它是逐帧竞技场单位动画的实际需求方）：
+// ★ 三条语义（**只加在重载上，旧签名语义逐字不变**）：
 //   ① **`fps == 0` = 静止帧（停播、停在某帧）**，不是"1 fps 慢慢抖"。
-//      出处 `UnitView.cs:441 "if (fps <= 0f) return;   // 0 = 该档"静止帧（不播）""` + `FpsFor`
-//      （idle 档返回 `0f`：原版的 idle 是**单条静止姿态帧**，按 0 播才是对的）。
+//      （idle 档用 `0f` 帧率 ⇒ 单条静止姿态帧，按 0 播才是对的）。
 //      ⇒ `Play(frames, indices, fps, loop)` / `PlayStill(frames, index)` 按这条；旧 `Play(frames, fps)`
 //      仍是"非法 fps ⇒ 1 fps + 降频 Warn"（那是既有契约，见上）。
-//   ② **帧段子集 / 多区间**：一档动画的帧往往**不是连续区间**（`UnitView` 的 `chr_archer` attack =
+//   ② **帧段子集 / 多区间**：一档动画的帧往往**不是连续区间**（例：`attack` =
 //      帧 `182-230 ∪ 247-251`），只喂连续 `Sprite[]` 就得每次换档现切一份数组，且容易把别的动作的帧夹进来。
 //      ⇒ 新增 `Play(frames, int[] indices, …)`（下标集合，顺序即播放顺序）+
-//      静态 `ExpandRuns(runs, frameCount, out error)`（把 `[起始, 长度, …]` 的段表展开成下标集合，
-//      形状与 `UnitAnimTable.Clip.Runs` 一致）。
+//      静态 `ExpandRuns(runs, frameCount, out error)`（把 `[起始, 长度, …]` 的段表展开成下标集合）。
 //   ③ **换档滞回** `<see cref="SpriteFrameAnimator.SwitchTo"/>`：同档不重播；当前档是"播一次且未播完"时
-//      扣住不让位（除非 `force`）。出处 `UnitView.cs:363-383` 的滞回规则 —— 服务端的 `anim` 是**瞬时**的
+//      扣住不让位（除非 `force`）。服务端的 `anim` 是**瞬时**的
 //      （一次挥砍只在那一 tick 置 attack，下一 tick 就回 walk），若每 tick 都照单全收，
 //      表现就是"攻击 1 帧 → 走路从头重来"的单位**抽搐**。
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,7 +185,7 @@ namespace CloverEngine
         /// </para>
         /// <para>
         /// ⛔ <b>传入的数组按只读对待</b>：本类**不克隆**（换档是热路径）。调用方请把每个档位的切片
-        /// 缓存起来复用（参考实现就是按"目录 × 档位 × 视角"缓存 `<c>_clip</c>` 的），不要每次换档现造。
+        /// 缓存起来复用（按"目录 × 档位 × 视角"缓存 `<c>_clip</c>`），不要每次换档现造。
         /// </para>
         /// </summary>
         /// <param name="frames">整张帧表（切片的元素下标指向它）。</param>
@@ -213,7 +206,7 @@ namespace CloverEngine
         /// <summary>
         /// 摆一个**静止帧**（<c>fps = 0</c> 的等价入口，语义最直白）：显示第
         /// <paramref name="index"/> 帧并停住，<see cref="Advance"/> 不再推进。
-        /// <para>出处：原版 idle 档是单条静止姿态帧（`UnitView` 的 idle 用 <c>0f</c> 帧率 ⇒ 停在首帧）。</para>
+        /// <para>原版 idle 档是单条静止姿态帧（用 <c>0f</c> 帧率 ⇒ 停在首帧）。</para>
         /// </summary>
         /// <param name="frames">帧表。</param>
         /// <param name="index">要停在第几帧（越界会被夹到 [0, 帧数-1]）。</param>
@@ -225,7 +218,7 @@ namespace CloverEngine
 
         /// <summary>
         /// **换档**（带滞回）—— 把 <see cref="Play(Sprite[], int[], float, bool)"/> 与滞回规则合成一步。
-        /// <para>三条规则（出处 `UnitView.cs:363-383` 的实测滞回）：</para>
+        /// <para>三条规则：</para>
         /// <list type="number">
         /// <item>请求档 == 当前档（帧表引用 / 切片引用 / fps / loop 全同）⇒ **什么都不做**（⛔ 绝不从第 0 帧重播）；</item>
         /// <item>当前档是"**播一次且还没播完**"（<see cref="Loop"/> = false 且 <see cref="IsPlaying"/> = true）
@@ -262,7 +255,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 把**帧段表**展开成帧下标数组。<paramref name="runs"/> 的形状 = <c>[起始帧号, 长度, 起始帧号, 长度, …]</c>
-        /// （与参考实现 `UnitAnimTable.Clip.Runs` 同形状，便于两端对照）。
+        /// （扁平段表，便于两端对照）。
         /// <para>
         /// 严格校验（任一不合法即返回 <c>null</c> 并写出原因，⛔ 不做"静默裁剪"——
         /// 帧段表算错会导致"播到不属于本动作的帧"，那种现象极难归因）：

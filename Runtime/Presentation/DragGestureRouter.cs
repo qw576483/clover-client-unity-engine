@@ -2,18 +2,12 @@
 // CloverEngine · Runtime/Presentation/DragGestureRouter.cs
 // 「拖拽 vs 滚动」手势仲裁器 —— 纯逻辑（无 MonoBehaviour、无协程），由业务的拖拽事件驱动。
 //
-// 来源（决策规则逐字搬移；阈值 / 让位条件已参数化）：
-//   clover-project-cr · client/Assets/Scripts/UI/CardDragHandle.cs:52-228
-//     · :62    `DragThresholdPx = 12f`（判"拖动"而不是"点击"的位移阈值；uGUI 自己先用
-//              `EventSystem.pixelDragThreshold`（默认 10）挡一道，本阈值只用来**判方向**）
-//     · :130-138 `PointerAboveScrollTop(screen)`（指针拖出滚动列表上沿 = 升格为拖拽）
-//     · :157-206 `OnDrag` 的四条分支（①②③④，见下「让位规则」）
-//     · :64-73  `_clickSuppressed` / `ConsumeClickSuppressed`（压掉"拖完又触发一次点击"）
-//     · :208-227 `OnEndDrag`（★ 收尾时必须清"压点击"标记，理由见 :220-225）
-//
-// 为什么沉：
-//   「一个 ScrollRect 里有可拖出的格子」是**通用** UI 结构（列表 + 拖拽重排 / 拖拽入槽），
-//   uGUI 的仲裁机制决定了这件事必须由**拿到事件的那个组件**自己做，所以每个项目都会重写一遍。
+// 口径（阈值 / 让位条件已参数化）：
+//   · `DefaultDragThresholdPx = 12f`（判"拖动"而不是"点击"的位移阈值；uGUI 自己先用
+//     `EventSystem.pixelDragThreshold`（默认 10）挡一道，本阈值只用来**判方向**）；
+//   · 指针拖出滚动列表上沿 = 升格为拖拽；
+//   · 让位分支见下「让位规则」；
+//   · 「压点击」标记（`ConsumeClickSuppressed`）：★ 收尾时必须清掉（理由见 <see cref="End"/> 的注释）。
 //
 // ★ 关键前提（决定了本件为什么必须存在；两条都有出处）：
 //   ① uGUI 把 `pointerDrag` 判给**最靠前（最深层）**的那个 `IDragHandler`
@@ -28,7 +22,7 @@
 // 让位规则（优先级从高到低，一段手势**只有一个**归属）：
 //   ① 指针已拖到**滚动区之外**（调用方给的 <c>escapedRegion</c>）⇒ 归**拖拽**
 //      （必须优先于方向判定：列表在下方、目标槽位在上方时，"把格子拖到槽位"的主方向恰恰是**纵向**，
-//        只按方向判会把它当滚动 —— 原件 2026-09-24 实测：拖向槽位 Δ=(62.8, +251.3) 被判成 scroll，
+//        只按方向判会把它当滚动（实测：拖向槽位 Δ=(62.8, +251.3) 被判成 scroll，
 //        格子一个都没动）。
 //   ② 否则**纵向占优**（|dy| &gt; |dx|）⇒ 归滚动；**横向占优** ⇒ 归拖拽。
 //   ③ 一旦定为拖拽就**不再改主意**；滚动中的手势若拖出滚动区仍会**升格**为拖拽
@@ -42,7 +36,7 @@
 //   `m_PointerStartLocalCursor` / `m_StartPosition`，所以从手指中段接管**不会跳一下**。
 //   ⇒ 本件只回答"这一拍该干什么"，转发动作留在业务（各项目承载体不同：ScrollRect / 自研列表）。
 //
-// 已知事故 / 坑：
+// 已知失效模式：
 //   · 压点击标记**必须**在 <see cref="End"/> 里清掉：`ReleaseMouse` 是**先 click 后 endDrag**，
 //     所以进入 End 时本次手势的尾巴（如果有）已经派发完；此刻清掉既不影响它，又避免
 //     "松手落在别的对象上、那次 click 没来"时把标记留成 true —— 那种情况下，玩家**下一次正常点击**
@@ -214,7 +208,7 @@ namespace CloverEngine
         /// 抬起：结束本段手势，返回收尾动作（<see cref="Step.EndScroll"/> / <see cref="Step.EndContent"/> /
         /// <see cref="Step.None"/>）。
         /// <para>
-        /// ★ 这里**一并清掉"压点击"标记**，理由见文件头「已知事故」——`ReleaseMouse` 是
+        /// ★ 这里**一并清掉"压点击"标记**，理由见文件头「已知失效模式」——`ReleaseMouse` 是
         /// **先 click 后 endDrag**，此刻清既不影响本次尾巴，又能避免残留标记吞掉下一次正常点击。
         /// </para>
         /// </summary>

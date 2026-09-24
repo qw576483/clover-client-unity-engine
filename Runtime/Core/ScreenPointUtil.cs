@@ -2,38 +2,33 @@
 // CloverEngine · Runtime/Core/ScreenPointUtil.cs
 // 指针/屏幕点 ↔ 画布矩形 / 世界点 换算的**统一入口**（含"正交相机到地面"的退化口径）。
 //
-// 来源（**三份逐字重复**的实现，收敛成一处）：
-//   clover-project-cr · client/Assets/Scripts/
-//     · UI/Panels/DeckEditPanel.cs:1340-1358   `UiPointConvertCamera()`
-//     · UI/Panels/HudPanel.cs:1485-1513        `UiPointConvertCamera()`（**含根因实机读数**）
-//     · UI/CardDragHandle.cs:140-146           `UiCamera()`
-//   三者的实现**完全相同**：`canvas = context.GetComponentInParent<Canvas>()；
+// 核心规则（唯一实现处）：`canvas = context.GetComponentInParent<Canvas>()；
 //   if (canvas == null || canvas.renderMode == ScreenSpaceOverlay) return null; return canvas.worldCamera;`
-//   （HudPanel 那份只是把 `GetComponentInParent` 的起点换成它自己的 `_root`。）
+//   —— Overlay 画布不可用相机，其余画布模式用画布自己的 `worldCamera`。
 //   调用点（共 6 处）：`ScreenPointToWorldPointInRectangle` / `ScreenPointToLocalPointInRectangle` /
-//   `RectangleContainsScreenPoint` —— 拖拽幽灵体定位、拖动"拖出列表上沿"判定、手牌命中测试、落点格换算。
+//   `RectangleContainsScreenPoint` —— 拖拽幽灵体定位、拖出列表上沿判定、命中测试、落点格换算。
 //   另：`IsoLayout.ScreenToWorldOnGround`（`Runtime/Core/IsoLayout.cs:104-125`）是**同一条**
 //   "正交 → 地面"规则的**格坐标版**（它的退化兜底写死 10，且顺带产出格坐标）。
 //
-// 为什么沉 / 为什么落 Core：
+// ★ 通用性依据（为什么落 Core）：
 //   ① 这是 UI / View / 输入三处都要用的**只读换算**，而模块之间禁止互相引用（结构规则 §2.1）
 //      ⇒ 只有放 `Core` 才能被所有模块共用（`Core` 已直接用 `RectTransform`：
 //      `PresentationContracts.cs:198` 的 `ShowGuide(RectTransform, …)`；`Core` 已引用
 //      `UnityEngine.UIModule`，`Canvas` / `RectTransformUtility` 都在其中）。
 //   ② 越界代价：`RectTransformUtility` 收**非空**相机时会把屏幕点当成"相机视锥里的一个方向"
 //      再投到画布平面 ⇒ 与 Overlay 画布（世界坐标**就是屏幕像素**）相差一次相机投影。
-//      三份重复实现各自把这条写了一遍注释，说明它**每处都要重新踩一次** ⇒ 收到一处。
+//      三份重复实现各自把这条写了一遍注释 ⇒ 口径必须统一在一处（本件）。
 //
-// ★ 根因记录（照抄 HudPanel 那份的**实机读数**，2026-09-22）：
+// ★ 实机读数（2026-09-22）：
 //   常驻画布 `canvas.renderMode = ScreenSpaceOverlay`（引擎 `Runtime/Presentation/UI.cs:49`），其世界坐标
 //   **就是屏幕像素**。实测（1080×1920 画布 + 正交半高 16 的场地相机，相机在 (0,0,-10)）：
 //   某 UI 元素中心的真屏幕点 =(214,221)，
 //   `RectangleContainsScreenPoint(rect, (214,221), mainCam) = False`、传 `null` 时为 `True` ⇒
 //   命中测试返回 -1 ⇒ **按下根本不进入拖拽链**（症状 = "卡牌拖不动 / 放不上战场"）。
-//   ⇒ **⛔ 所以相机必须按画布模式取，不是"取一台相机就完事"**：Overlay ⇒ null；
+//   ⇒ **⛔ 相机必须按画布模式取，不是"取一台相机就完事"**：Overlay ⇒ null；
 //     ScreenSpaceCamera / WorldSpace 才用画布自己的 `worldCamera`。本件的
 //     <see cref="CameraForCanvas"/> / <see cref="CameraForUi"/> 就是这条口径的唯一实现。
-//   ⚠️ 与之**相反**的一条别混：竞技场那边"屏幕 → 格"要的**正是**相机的投影，仍用
+//   ⚠️ 与之**相反**的一条别混：把**世界点投到屏幕**（再转画布局部点）要的**正是**相机的投影，用
 //     `UIFactory.UICamera()`（`Runtime/Presentation/UIWidgets.cs:261-266`，引擎给 UI 侧取世界相机
 //     的官方入口）—— 两件事，⛔ 不要互换。
 //
@@ -44,7 +39,7 @@
 //   所以必须**退化为固定值**（本件把它做**参数** <c>fallbackDepth</c>，默认 10；`IsoLayout` 那份写死 10）。
 //   ⛔ 唯一真相包的边界：面向**格坐标**的换算请用 `IsoLayout.ScreenToWorldOnGround` / `ScreenToGrid`；
 //     本件只做「屏幕 ↔ 画布矩形 / 世界点」与「正交屏幕 → 地面世界点（退化值可参数化）」。
-//   ★ 裁决（2026-09-24，本次下沉评审）：两份**保持两份、不收敛**。理由与前提：
+//   ★ 裁决（2026-09-24）：两份**保持两份、不收敛**。理由与前提：
 //     · 「正交 → 地面」是同一条规则的两份实现 —— 本件 fallback **参数化**、只出**世界点**（面向 UI / 输入侧）；
 //       `IsoLayout` 那份 fallback **写死 `10`**、顺带产出**格**坐标（面向格子的调用点）。
 //     · ⛔ **将来若要收敛，前提是先给 `IsoLayout` 补 static 入口** —— 否则调用方（UI / 输入侧）为了拿一个
@@ -52,7 +47,7 @@
 //       即：收敛的**前置条件**是 `IsoLayout` 自己先提供一个不需要实例的等价入口，
 //       ⛔ 而不是把调用方赶去填 4 个用不到的参数。
 //
-// 已知事故 / 坑：
+// 失效模式：
 //   · `rect` 为 null ⇒ 一律返回 false + 降频 Warn（返回"成功 + 零向量"会让调用方把元素摆到原点）。
 //   · 画布模式取错（把场地相机喂进 Overlay 画布的换算）**不会抛异常**，只会让命中**恒为 false**
 //     （"点了没反应"）或让元素整体偏一次投影 —— 这是本件存在的首要原因。
@@ -150,7 +145,7 @@ namespace CloverEngine
         public static bool TryScreenToLocalInRect(RectTransform rect, Vector2 screen, Component context, out Vector2 local)
             => TryScreenToLocalInRect(rect, screen, CameraForUi(context), out local);
 
-        /// <summary>屏幕点是否落在矩形的**屏幕矩形**内（命中测试；⛔ 相机必须按画布模式取，见文件头根因）。</summary>
+        /// <summary>屏幕点是否落在矩形的**屏幕矩形**内（命中测试；⛔ 相机必须按画布模式取，见文件头口径）。</summary>
         public static bool ContainsScreenPoint(RectTransform rect, Vector2 screen, Camera cam)
         {
             if (rect == null)

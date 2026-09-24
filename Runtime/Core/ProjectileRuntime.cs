@@ -1,23 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/ProjectileRuntime.cs
-// 投射物**飞行积分 + 逐格扫掠 + 最近命中** —— 纯计算运行时，下沉到引擎。
+// 投射物**飞行积分 + 逐格扫掠 + 最近命中** —— 纯计算运行时。
 //
-// 【出处】
-//   · 飞行积分 / 命中半径 / 格坐标 / 连续格→世界坐标 / 轨迹文本：
-//     clover-project-diablo2 `client/Assets/Scripts/Module/Skill/Projectile.cs:25-157`
-//     （`Step` / `Overlaps` / `Grid` / `WorldOf` / `TrailText`，整段逐行照搬）；
-//   · 逐格扫掠 + 最近命中 + 单帧推进次序：
-//     `client/Assets/Scripts/Module/Skill/SkillModule.cs:731-959`
-//     （`TickProjectiles` / `TrySweepTerrain` / `FindHitMonster`；`RetireProjectile` 属"表现层回收"，
-//     见下「为什么不一起下沉」）。
+// 【本件包含两组能力】
+//   · 飞行积分 / 命中半径 / 格坐标 / 连续格→世界坐标 / 轨迹文本
+//     （`Step` / `Overlaps` / `Grid` / `WorldOf` / `TrailText`）；
+//   · 逐格扫掠 + 最近命中 + 单帧推进次序（`Advance` / `TrySweepTerrain` / `FindNearestHit`）。
 //
-// 【为什么下沉（通用性判据）】
+// 【前提与不变量】
 //   · 「沿方向按速度积分 + 一帧内逐格采样防穿墙 + 取最近的重叠目标」是**题材无关的投射物底座**：
-//     任何有"子弹 / 箭矢 / 火弹"的 2D 格游戏都要它；
+//     任何有"子弹 / 箭矢 / 火弹"的 2D 格游戏都适用；
 //   · 只吃 `Vector2 / Vector2Int / float` + **回调**，⛔ 不引用任何项目类型、⛔ 不引用
 //     `UnityEngine.GameObject`（表现留在项目侧）⇒ 可被离线宿主单编单跑、逐例断言，不必起 Play
-//     （与 `GridUtil` / `Separation2D` 同一理由）；
-//   · 引擎全仓在本次改动前对 `TrySweepTerrain|FindNearestHit|ProjectileBody` **0 命中** ⇒ 引擎缺口。
+//     （与 `GridUtil` / `Separation2D` 同一理由）。
 //
 // 【注入点（三个）—— "这一格能不能走" / "打到谁了" / "消散·命中要干什么"】
 //   ① <see cref="ProjectileBody"/>：把"投射物的状态"抽成结构体（位置 / 方向 / 速度 / 剩余射程 /
@@ -28,16 +23,14 @@
 //      —— 因为那三件事（销毁表现节点 / 播命中音效 / 打日志 / 走伤害管线）**全是项目侧副作用**，
 //      引擎件只负责"算出该发生哪一种"。
 //
-// 【为什么不一起下沉】（⛔ 别把这三样搬进来）
-//   · `ProjectileView`（`Projectile.cs` 的 `View` / `Renderer` 字段）：表现层，属项目；
-//   · `TileKind` / `BlocksProjectile` 的逐类裁决表：**题材语义**（水格挡不挡弹道取决于该项目的地形模型），
-//     引擎若抄一份就会与项目的地形定义**双源**，新增地形值时静默失配；
-//   · `ResolveHit` / `ResolveTerrainHit` / `RetireProjectile`：伤害管线 / 音效 / 日志 / 销毁节点的**副作用**。
+// 【不并入本件的三样】（⛔ 别搬进来）
+//   · 视图节点 / 渲染器字段：表现层，属项目；
+//   · 地形→可否穿越的逐类裁决表：**题材语义**（水格挡不挡弹道取决于调用方的地形模型），
+//     引擎若抄一份就会与地形定义**双源**，新增地形值时静默失配；
+//   · 命中 / 撞地形的善后（伤害管线 / 音效 / 日志 / 销毁节点）：**副作用**。
 //
-// 【用法 + 首个消费方】
-//   diablo2 `Module/Skill/SkillModule.cs` 的 `TickProjectiles`（消费本类的 `Advance` + 两个探针）、
-//   `Module/Skill/Projectile.cs` 的 `Step` / `Overlaps` / `Grid` / `WorldOf` / `TrailText`（转发到本类）。
-//   调用次序固定为：`Advance` → 按 `SteppedPos` 补轨迹点 → `ProjectileView.Sync` →
+// 【用法】
+//   调用次序固定为：`Advance` → 按 `SteppedPos` 补轨迹点 → 视图 `Sync` →
 //   若 `Clipped` 再 `Sync` 一次（截停后的表现点）→ 按 `Outcome` 分派。
 //
 // 【已知边界与精度限制】
@@ -47,15 +40,13 @@
 //     `sampleStep` 越小越不会整格跳过，但步数线性上升（默认 <see cref="DefaultSampleStep"/> = 0.25 格）；
 //   · `blocked == null`（拿不到地图 / 地图未生成）⇒ **本帧不做地形阻挡**（返回 false）+ 降频 Warn；
 //   · **必须先地形、后命中**：一帧跨多格时端点会越过墙，若先判怪物就成"隔墙射杀"（见 `Advance` 注释）；
-//   · `TrySweepTerrain` 是**格级采样**，不是逐格的精确 DDA —— 与项目原实现同口径（同输入同输出）。
-//
-// 【修复或移植时踩过的坑】（照搬原文件的记录）
+//   · `TrySweepTerrain` 是**格级采样**，不是逐格的精确 DDA（同输入同输出）。
 //   · `StopAt` 只在"进入一个**新**格且该格可穿"时更新 ⇒ 同一格内不重复更新；
-//     若改成"每次采样都更新"，表现点会贴到格内更深处、`traveled` 回退量随之变化（数值差异，不易察觉）。
+//     ⛔ 若改成"每次采样都更新"，表现点会贴到格内更深处、`traveled` 回退量随之变化（数值差异，不易察觉）。
 //   · 撞地形时 `traveled` 必须**回退**到截停位置（`Traveled -= Distance(StopAt, 飞过头的位置)`），
 //     否则日志里的"飞了 N 格"会算上被截掉的那一段。
 //   · `FindNearestHit` 的相等距离（`d >= bestDist`）**不替换** ⇒ 保留"先遇到的那只"，
-//     与项目原实现的遍历顺序绑定（列表顺序变了命中对象就变）。
+//     命中对象与候选列表的遍历顺序绑定（列表顺序变了命中对象就变）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System;
@@ -65,7 +56,7 @@ using UnityEngine;
 namespace CloverEngine
 {
     /// <summary>
-    /// 单次 <see cref="ProjectileBody.Step"/> 的结果（= 项目原实现里"这一步之后还活着吗"的显式化）。
+    /// 单次 <see cref="ProjectileBody.Step"/> 的结果（"这一步之后还活着吗"的显式化）。
     /// </summary>
     public enum ProjectileStepResult
     {
@@ -143,7 +134,7 @@ namespace CloverEngine
     /// 投射物飞行状态（**纯数据 + 飞行积分**）：位置 / 方向 / 速度 / 剩余射程 / 命中半径 / 累计飞行 / 存活。
     /// <para>
     /// ⛔ 刻意**不含**：表现节点（View / Renderer）、伤害、技能 id、地形类型、命中记录 ——
-    /// 那些是项目语义，留在项目侧（见文件头「为什么不一起下沉」）。
+    /// 那些是项目语义，留在项目侧（见文件头「不并入本件的三样」）。
     /// </para>
     /// <para>
     /// **确定性**：同输入 ⇒ 同输出，逐位相同；不读时钟 / 帧号 / 全局态。非线程安全：主线程使用。
@@ -176,7 +167,7 @@ namespace CloverEngine
         /// 按 <paramref name="dt"/> 推进一步（**不判命中** —— 命中判定需要目标列表，由
         /// <see cref="ProjectileRuntime.Advance"/> 做）。
         /// <para>
-        /// 语义与 diablo2 原实现逐字一致：`step = speed * dt`；`step &lt;= 0` ⇒ 原样返回
+        /// 语义：`step = speed * dt`；`step &lt;= 0` ⇒ 原样返回
         /// <see cref="ProjectileStepResult.NoAdvance"/>（位置 / 射程 / 存活都不变）；
         /// `step ≥ RangeLeft` ⇒ 截到剩余射程、`RangeLeft = 0`、`Alive = false`、仍把位置推到终点；
         /// 否则扣减剩余射程。两条推进路径**都**累加 <see cref="Traveled"/>。
@@ -235,7 +226,6 @@ namespace CloverEngine
         /// <summary>
         /// 逐格采样的默认步长（格）。**必须 &lt; 1**：采样只在"格号变化"时判一次，步长越大越可能整格跳过
         /// （高速投射物一帧跨多格）⇒ 取 1/4 格，保证任意线段都不会跳过一整格。
-        /// 与 diablo2 原实现同值（`SkillModule.TerrainSampleStep`）。
         /// </summary>
         public const float DefaultSampleStep = 0.25f;
 
@@ -331,7 +321,7 @@ namespace CloverEngine
         /// <summary>
         /// 推进一枚投射物**一帧**：飞行积分 → **地形逐格扫掠** → 命中判定 → 分类。
         /// <para>
-        /// ★ 次序**不可调换**（diablo2 审计 B 红行 R3）：一帧跨多格（高速 / 卡帧后的 dt）时端点会越过墙，
+        /// ★ 次序**不可调换**：一帧跨多格（高速 / 卡帧后的 dt）时端点会越过墙，
         /// 若先判怪物就会判成"命中墙后那只怪"= 隔墙射杀。故**先地形、后命中**；且撞地形截停后
         /// **还要再判一次命中** —— 贴墙站着的怪要能被打到（否则这次判定会被墙"吃掉"）。
         /// </para>
@@ -447,7 +437,7 @@ namespace CloverEngine
         /// <summary>
         /// 轨迹的**可读形式**（自证打印）：`(x1.00,y1.00) → (x2.00,y2.00) …`（最多取前 <paramref name="max"/> 个点；
         /// 超长时补 `…（共 N 点，末点 (x,y)）`）。空轨迹返回 `(空)`。
-        /// <para>格式与 diablo2 原实现逐字一致（判据脚本会比对这两段文本）。</para>
+        /// <para>格式固定（判据脚本会比对这两段文本）。</para>
         /// </summary>
         /// <param name="trail">轨迹点（连续格坐标）。</param>
         /// <param name="max">最多打印前几个点（&lt;= 0 按 8 处理）。</param>

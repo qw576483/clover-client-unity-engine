@@ -13,10 +13,9 @@ namespace CloverEngine.Tests
     /// 协议编/解往返 + 常量冻结 + 四条边界不抛 + 真实 UDP 的「应答端被浏览器扫到」。
     ///
     /// <para>
-    /// 为什么必须有这一份：在应答端补齐之前，工程里「Find Servers 恒为 0 台」**分不清**
-    /// 是"没有主机在跑"还是"没人应答"（<c>Tests/PlayMode/LanBrowserLoopbackTests.cs</c> 里的
-    /// <c>ResponderLoop</c> 只是个测试用替身，业务用不到）。这里用**真实实现**把两端接起来，
-    /// 让「有主机在跑却扫不到」变成一条可判定的断言。
+    /// 本份用**真实实现**把浏览器与应答端接起来（<c>Tests/PlayMode/LanBrowserLoopbackTests.cs</c> 里的
+    /// <c>ResponderLoop</c> 只是测试用替身，业务用不到），让「有主机在跑却扫不到」变成一条可判定的
+    /// 断言 —— 否则「Find Servers 恒为 0 台」**分不清**是"没有主机在跑"还是"没人应答"。
     /// </para>
     /// </summary>
     public class LanResponderTests
@@ -158,7 +157,7 @@ namespace CloverEngine.Tests
         }
 
         /// <summary>
-        /// 协议常量**逐字冻结**：值被改动 = 与既有主机 / cs16 等既有客户端不兼容
+        /// 协议常量**逐字冻结**：值被改动 = 与既有主机 / 既有客户端不兼容
         /// （改一个字符，现象是"一台都扫不到"）。
         /// </summary>
         [Test]

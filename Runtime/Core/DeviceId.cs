@@ -159,8 +159,8 @@ namespace CloverEngine
         private static bool IsUsableNativeId(string id, out string reason)
         {
             // 编辑器里 SystemInfo.deviceUniqueIdentifier 返回的是**开发机 ID**：
-            // 它不是"设备"的身份，且全组开发共用同一个号（画面上的表现是"互相顶号"）。
-            // 类注释早把它列为应过滤的坏值，旧实现却漏了这道判断 —— 这里补上。
+            // 它不是"设备"的身份，且全组开发共用同一个号（画面上的表现是"互相顶号"）——
+            // 属应过滤的坏值，必须在这里拦掉。
             if (Application.isEditor)
             {
                 reason = "running in Unity Editor: dev machine id shared by the whole team";
@@ -260,9 +260,9 @@ namespace CloverEngine
         /// 写入本地持久化。返回**真实的持久化结果**——失败时不抛异常，由调用方决定降级
         /// （走到会话级临时码并告警，见构造函数 ③）。
         /// <para>
-        /// 旧实现无条件 <c>return true</c>：<c>Setting.Save</c> 不向外抛异常（内部自吞），
+        /// <c>Setting.Save</c> 不向外抛异常（内部自吞），若无条件 <c>return true</c>，
         /// 写盘失败也照样"成功"，<see cref="DeviceIdSource.Ephemeral"/> 兜底永远走不到，
-        /// 表现为设备码每次重启都变、身份静默漂移。
+        /// 表现为设备码每次重启都变、身份静默漂移 —— 故必须回报真实结果。
         /// </para>
         /// <para>
         /// 本方法能确证的是"值已进入设置存储且能读回"；真正的磁盘写入结果由 Setting 内部负责

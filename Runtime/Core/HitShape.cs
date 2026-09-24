@@ -1,31 +1,25 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/HitShape.cs
-// 命中判定几何：正面扇形 + 矩形走廊 + 线段通畅 —— 纯函数静态工具，下沉到引擎。
+// 命中判定几何：正面扇形 + 矩形走廊 + 线段通畅 —— 纯函数静态工具。
 //
-// 【出处】clover-project-diablo2 的
-//   client/Assets/Scripts/Module/Combat/MeleeShape.cs:48-152（整类逐行照搬，算法与边界一字未改）。
-//   该文件自称「攻击判定形状的唯一口径」，⛔ 项目侧改动后仍保留那句话：本类现在是**唯一实现**，
-//   diablo2 的 MeleeShape 退化为薄转发（只留题材调参常量）。
+// 本类是攻击判定形状的**唯一实现**；题材调参常量留在调用方。
 //
-// 【为什么下沉（通用性判据）】
+// 【前提与不变量】
 //   ① 三件都是**题材无关的纯几何**：任意 2D 格游戏都可能要「正面锥 / 矩形走廊 / 线段不穿墙」；
 //   ② 只吃 float / Vector2Int，不碰 MonoBehaviour / 场景 / 地图实现（地形用**回调注入**）⇒
-//      可被离线宿主 / EditMode 直接调用并断言，不必起 Play（与 GridUtil / Separation2D 同一理由）；
-//   ③ 引擎全仓在本次改动前对 `InFrontCone|InMeleeRect|LineClear` **0 命中** ⇒ 属**引擎缺口**，
-//      故整体下沉为引擎底座（能力层路由见 skill `patterns/engine-fix.md`：通用底座 = C 桶之外的底座类）。
-//   ⛔ 本类**不预设** 60° / 1.2 格这类数值 —— 那是**题材调参**（diablo2 的 8 向朝向量化误差推导），
+//      可被离线宿主 / EditMode 直接调用并断言，不必起 Play（与 GridUtil / Separation2D 同一理由）。
+//   ⛔ 本类**不预设** 60° / 1.2 格这类数值 —— 那是**题材调参**，
 //      由调用方传 `cosMin` / `reach` / `halfWidth` 进来。
 //
-// 【用法 + 首个消费方】
-//   diablo2 `Module/Combat/MeleeShape.cs`：`ToUnit` / `InFrontCone` / `InMeleeRect` / `LineClear`
-//   四个入口全部转发到本类（调用点见该文件的 `MeleeShape` 类体）。
-//   调用顺序固定为：① 朝向格增量由调用方用**引擎权威表** `IsoLayout.DirectionDelta(dir)` 取好 →
+// 【用法】
+//   四个入口 `ToUnit` / `InFrontCone` / `InMeleeRect` / `LineClear`；调用顺序固定为：
+//   ① 朝向格增量由调用方用**引擎权威表** `IsoLayout.DirectionDelta(dir)` 取好 →
 //   ② `ToUnit(dx, dy, out fx, out fy)`（false = 零向量 ⇒ 调用方拒绝本次攻击并留痕）→
 //   ③ `InFrontCone` **且** `InMeleeRect` 同时成立才算"在攻击形状内" →
 //   ④ `LineClear(walkable, from, to)` 是**独立的一关**（近战与远程都要过）。
 //
 // 【已知边界与精度限制】
-//   · `InFrontCone` 的零偏移（与攻击者同格，dx=dy=0）**恒返回 true** —— 见下「踩过的坑」；
+//   · `InFrontCone` 的零偏移（与攻击者同格，dx=dy=0）**恒返回 true**（零距离上"夹角"无定义；见下条）；
 //   · `InMeleeRect` 的 `reach` / `halfWidth` 是**格**单位，零偏移天然满足（沿轴 0 ∈ [0, reach]、垂距 0）；
 //   · `LineClear` 是 **Bresenham 格级**口径（除两端点外每格都要 walkable），**不是**原版
 //     `Missiles.txt` 的 sub-tile 单位外接框求交 —— 本类服务的是"格坐标口径"的游戏；
@@ -33,20 +27,17 @@
 //     那是**防御异常入参**（`BadLine` 导致死循环时能退出），不是正常路径；
 //   · `walkable == null`（地图未接入）⇒ **放行**（返回 true），⛔ 不把"拿不到地图"变成"打不到"，
 //     由调用方留痕。
-//
-// 【修复或移植时踩过的坑】（照搬原文件的记录，⛔ 别再把它们改回去）
-//   · **同格被角度锥拒掉**：原版近战触及是**距离 / 外接框的整数口径**，不是角度口径 ——
+//   · **同格必命中**：原版近战触及是**距离 / 外接框的整数口径**，不是角度口径 ——
 //     ① `<根>/原版资源/d2lod1.10txt-1.10f/data/global/excel/Weapons.txt` 第 20 列 `rangeadder`
 //        （近战武器追加触及：短剑 / 手斧 = 空(=0)，战杖 `War Staff` = 1）⇒ 触及 = 1 + rangeadder **格**；
 //     ② 同目录 `MonStats2.txt` 第 8 列 `MeleeRng`（骷髅 `skeleton1` = 0）⇒ 同样是**格数**。
 //     两处都表明"够不够得着"是**沿距离比较**（`0 ≤ reach` 恒真，同格时外接框必然重叠）⇒
-//     **同格必命中**。角度锥是**本项目新增的量化近似**，它不该在"距离 0"这个本该恒真的点上把攻击拒掉：
-//     diablo2 实测 40 次真实左键**全被拒**（`report-audioverify2.md` §2.3）。
-//     ⛔ 只补这一个退化点（`ZeroOffsetEpsilon`），**不把扇形放宽成圆形**。
+//     **同格必命中**。角度锥是**本项目新增的量化近似**，⛔ 不该在"距离 0"这个本该恒真的点上把攻击拒掉：
+//     只补这一个退化点（`ZeroOffsetEpsilon`），**不把扇形放宽成圆形**。
 //   · **零向量的处理**：`ToUnit` 对 (0,0) 返回 false 并清零出参（调用方拒绝攻击）——
 //     若这里返回 `(0,0)` 并当成合法朝向，扇形会把「背后的目标」判成命中（点积 0 ≥ cosMin 取决于
 //     cosMin 符号），这种错误**不报错、只表现为打击判定诡异**。
-//   · **`(int)` 强转的坑同族**（见 GridUtil 文件头）：格坐标一律 `Mathf.FloorToInt`，负格才不会向零截断。
+//   · 格坐标一律 `Mathf.FloorToInt`，负格才不会向零截断（`(int)` 强转的同族问题见 GridUtil 文件头）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System;
@@ -57,7 +48,7 @@ namespace CloverEngine
     /// <summary>
     /// 命中判定几何：**正面扇形 + 矩形走廊 + 线段通畅**（全部纯函数、无状态）。
     /// <para>
-    /// 契约（与 diablo2 `MeleeShape` 逐字一致，⛔ 改语义 = 改玩法判定）：
+    /// 契约（⛔ 改语义 = 改玩法判定）：
     /// ① <see cref="InFrontCone"/> —— 目标偏移与朝向单位向量的夹角余弦 ≥ <c>cosMin</c>；
     ///    **零偏移（同格）恒 true**（零距离上"夹角"无定义，而原版近战触及是距离/外接框口径）；
     /// ② <see cref="InMeleeRect"/> —— 以朝向为轴的矩形：沿轴投影 ∈ [0, reach] 且 |垂距| ≤ halfWidth；
@@ -77,14 +68,14 @@ namespace CloverEngine
         private const string Tag = "HitShape";
 
         /// <summary>
-        /// 线段遍历的格步数上限（防御：`BadLine` 参数导致死循环时能退出并返回 false）。
-        /// 与 diablo2 原实现同值；正常"一屏内的两点"远小于它。
+        /// 线段遍历的格步数上限（防御：`BadLine` 参数导致死循环时能退出并返回 false）；
+        /// 正常"一屏内的两点"远小于它。
         /// </summary>
         public const int MaxLineSteps = 1024;
 
         /// <summary>
         /// 判定"零偏移（同格）"的距离下限：低于它就认为目标与攻击者同格。
-        /// 与 diablo2 原实现同值（`1e-6f`）—— 它只吸收浮点噪声，不是"小步长也算同格"。
+        /// 取 `1e-6f` —— 它只吸收浮点噪声，不是"小步长也算同格"。
         /// </summary>
         private const float ZeroOffsetEpsilon = 1e-6f;
 
@@ -123,8 +114,8 @@ namespace CloverEngine
         /// <para>
         /// ★ **零偏移（与攻击者同格，dx=dy=0）⇒ 返回 true（命中）** —— 零距离上"夹角"无定义，
         /// 而**原版的近战触及是距离 / 外接框口径**（`Weapons.txt` `rangeadder` / `MonStats2.txt`
-        /// `MeleeRng`，见文件头「踩过的坑」）：`0 ≤ reach` 恒真 ⇒ 同格必命中。
-        /// ⛔ 只补这一个退化点；扇形本身与"正侧方 90° 不命中"的口径一字未动。
+        /// `MeleeRng`）：`0 ≤ reach` 恒真 ⇒ 同格必命中。
+        /// ⛔ 只补这一个退化点；扇形本身与"正侧方 90° 不命中"的口径不变。
         /// </para>
         /// </summary>
         /// <param name="fx">攻击者朝向单位向量 x。</param>

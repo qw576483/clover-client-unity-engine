@@ -156,7 +156,7 @@ namespace CloverEngine
             }
             else if (!string.IsNullOrEmpty(group) && pool.Group != group)
             {
-                // 已有池补填 / 变更分组：原实现只在首次创建时认 group，后续按场景名 ClearGroup 会漏清这个池。
+                // 已有池补填 / 变更分组（⛔ 只认首次创建时的 group 会让后续按场景名 ClearGroup 漏清这个池）。
                 Game.Logger?.Info("ObjectPool", $"池 {key} 的分组由 {pool.Group ?? "(null)"} 变更为 {group}");
                 pool.Group = group;
             }
@@ -220,7 +220,7 @@ namespace CloverEngine
                 {
                     obj.SetActive(false);
                     obj.transform.SetParent(Root, false);
-                    // 归零变换（位置 / 旋转 / 缩放）：原实现只 SetParent，脏变换会串给下一个使用者；
+                    // 归零变换（位置 / 旋转 / 缩放）—— 只 SetParent 会把脏变换串给下一个使用者；
                     // 缩放恢复成预制体的基准值，而不是硬写 Vector3.one。
                     obj.transform.localPosition = Vector3.zero;
                     obj.transform.localRotation = Quaternion.identity;
@@ -387,7 +387,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 造一个新实例：**注册过工厂的 key 一律走工厂**（代码造的对象也能入池，G5），
-        /// 未注册的 key 才回落既有的 <c>Resources.Load</c> 预制体路径（老行为一字未改）。
+        /// 未注册的 key 才回落 <c>Resources.Load</c> 预制体路径。
         /// <para>
         /// 工厂路径与预制体路径的执行顺序一致：先造、再挂父、再改名；两者都遵守"造不出就返回 null
         /// 并记 Error"（⛔ 不返回空壳对象 —— 那会让"预制体缺失/工厂写坏"变成静默的表现缺失）。
@@ -424,8 +424,8 @@ namespace CloverEngine
             var prefab = Resources.Load<GameObject>(key);
             if (prefab == null)
             {
-                // 不造空对象：原实现返回 new GameObject(key) 并登记进 Active / _reverseMap，
-                // 后续 Spawn 会把这个"无组件的有效实例"发给业务，失败被静默掩盖。
+                // 不造空对象（返回 new GameObject(key) 并登记进 Active / _reverseMap，
+                // 会让后续 Spawn 把这个"无组件的有效实例"发给业务，失败被静默掩盖）。
                 Game.Logger?.Error("ObjectPool", $"Prefab not found: {key}");
                 return null;
             }

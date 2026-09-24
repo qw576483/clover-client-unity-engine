@@ -3,16 +3,7 @@
 // 位图字模的**排版内核**（纯数据 + 纯函数；⛔ 不引用 UnityEngine ⇒ 可离线自检）：
 // 字符 → 格位（列 / 行 / 步进）、整串度量、按宽换行、图集 UV 切格、bestFit 缩放、字形回退链。
 //
-// 来源（逻辑逐字搬移，口径未改）：
-//   clover-project-diablo2 · client/Assets/Scripts/UI/D2Text.cs
-//     · :186-204   `Advance` / `Measure`        —— 步进 = 原版 `.tbl` 的 `width`；表外字符 = 格宽
-//     · :556-575   `StepOf` / `MeasureNative`   —— 拉丁表 / chi 表两套；两边都没有 ⇒ 0
-//     · :583-635   `WrapLines`                  —— 口径 = libd2 `font.zig` L188-216 `breakLine`
-//     · :277-287   `CellUv`                     —— 行主序格位 → UV（PNG 行 0 在上、UV (0,0) 在左下 ⇒ y 翻）
-//     · :969-979   bestFit 缩放                 —— `resizeTextForBestFit` 的"宽度超框就整体缩一档"
-//     · :537-553   `HasGlyph` 的回退            —— 直查 → 简繁 remap 再查（其余一律不画、不推进）
-//
-// 为什么沉：
+// ★ 通用性依据：
 //   这套内核**与素材无关** —— 它只做"整数格位 + 整数步进 + 矩形"的算术，唯一外部输入是
 //   「某字符的字形（列 / 行 / 步进）」与「格子 / 图集尺寸」。而引擎侧只有注入点没有本体：
 //   `TextHooks.ITextHook` 把引擎建的每个 `Text` 通知业务，却没有"位图字模怎么排"的实现
@@ -20,18 +11,18 @@
 //   本件把本体补齐：**素材加载（.tbl / .dc6 / png / 项目路径 / 简繁表）仍留业务侧**，
 //   通过 `IGlyphSource`（格子尺寸 + 图集尺寸 + 字符 → 字形）与回退链注入。
 //
-// ★ 因果（写下来以免后人"顺手优化"回去）：
+// ★ 为什么必须这样（⛔ 别"顺手优化"）：
 //   · **步进必须取表里的 `width`**，⛔ 不许用"格子宽"：原版拉丁字模的格子是同宽的，
 //     而每个字形的**推进量**不同（i / l 窄，W / M 宽）⇒ 用格宽排列会立刻把字距搞乱。
 //     （libd2 `font.zig` L67 原话："How far to advance after drawing it.
 //       This is the whole reason the table exists."）
-//   · **换行判据是"量到 ≥ 框宽就断"**（不是 `> 框宽`）：照搬原版 `breakLine`（L188-216），
+//   · **换行判据是"量到 ≥ 框宽就断"**（不是 `> 框宽`）：判据与参考物 `breakLine`（L188-216）一致，
 //     差一个比较符就会让每行比原版多 / 少一个字。
 //   · **表里没有的字符：不画、也不推进**（libd2 `font.zig` L130-131 注释 + L170 `orelse continue`）
 //     ⇒ 无字形时 `Step` / `Measure` 计 0，**不是**退回格宽。
-//     ⚠️ 拉丁表是例外：`Advance` 对**码位范围外**的字符返回格宽（原件行为，本件照搬）。
+//     ⚠️ 拉丁表是例外：`Advance` 对**码位范围外**的字符返回格宽（与参考物一致）。
 //
-// 已知事故 / 坑（原件踩过，本件保留口径）：
+// 注意：
 //   · 框宽 ≤ 0 ⇒ 不换行（原件 `availPx <= 0` 直接整段一行）；贪心循环里"一个字都塞不下"
 //     时**至少取一个字**，否则死循环。
 //   · 断在空格的：空格**不带到下一行**；`lastSpace > start` 才算数（行首空格不作断点）。
@@ -244,8 +235,7 @@ namespace CloverEngine
         /// <para>装得下 ⇒ 原样返回 <paramref name="scale"/>（⛔ 不放大、⛔ 不逐行缩）。</para>
         /// <para>
         /// ⚠️ 框宽 ≤ 0 时本函数**仍按原件口径**缩到 <paramref name="minScale"/>（原件是
-        /// <c>need > size.x</c> 直接进分支）⇒ 调用方应在框宽 &gt; 0 时才调用它
-        /// （本项目 `D2Label` 即包在 <c>if (_bestFit &amp;&amp; size.x > 0f)</c> 里）。
+        /// <c>need > size.x</c> 直接进分支）⇒ 调用方应在框宽 &gt; 0 时才调用它。
         /// </para>
         /// </summary>
         /// <param name="scaledWidth">已按 <paramref name="scale"/> 缩放后的内容宽度（px / 画布单位同口径）。</param>

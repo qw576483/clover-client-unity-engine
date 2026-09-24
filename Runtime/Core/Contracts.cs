@@ -174,14 +174,12 @@ namespace CloverEngine
         //   · 字段全是 int/string/bool 的扁平类**不标也能解**（看着一切正常）；
         //   · 而**数组 / List 的元素类型**（或嵌套字段类型）没标 [Serializable] 时，该字段被
         //     **静默丢成 null** —— 一条报错都没有。
-        // 参考实现（`clr-project-cr` 的 `Def/ProtoDef.cs`）记了完整实测：登录 / 创角（扁平回包）全过，
-        //   卡池 / 房间 / 对局快照（含对象数组）全空，服务端日志还显示"下发卡池 60 张"。
         // 现象极具误导性（"服务端没发数据" vs "客户端丢字段"分不出来），故提供一个**可选的**校验入口：
-        //   · `Deserialize` / `Serialize` 的默认行为**逐字不变**（⛔ 不许让既有调用方变严而炸掉）；
+        //   · `Deserialize` / `Serialize` 的默认行为**保持不变**（⛔ 不许让既有调用方变严而炸掉）；
         //   · 想拿到明确报错的调用方走 `DeserializeChecked`（失败时留 Error + `out error`，返回 null）。
         //
-        // 判据口径 = `Type.IsSerializable`（`[Serializable]` 会把它置 true），即参考实现记的那条
-        //   "typeof(T).IsSerializable 必须为 true"。
+        // 判据口径 = `Type.IsSerializable`（`[Serializable]` 会把它置 true）：
+        //   `typeof(T).IsSerializable` 必须为 true。
 
         /// <summary>`FindSerializableHoles` 的缓存（同一类型的洞不会变，只算一次）。</summary>
         private static readonly Dictionary<Type, List<string>> SerializableHoleCache = new();
@@ -281,14 +279,14 @@ namespace CloverEngine
             if (type == null || depth > MaxSerializableDepth) return;
             if (IsSerializableByNature(type)) return;
 
-            // 数组：只看元素类型（`T[]` 里的 `T` 缺 [Serializable] ⇒ 整个数组被丢成 null，这正是实测那个坑）
+            // 数组：只看元素类型（`T[]` 里的 `T` 缺 [Serializable] ⇒ 整个数组被静默丢成 null）
             if (type.IsArray)
             {
                 if (type.GetArrayRank() == 1) WalkSerializable(type.GetElementType(), path + "[]", depth + 1, holes, visited);
                 return;
             }
 
-            // List<T> / IList<T>：同上，元素类型才是坑
+            // List<T> / IList<T>：同上，看元素类型
             var element = ListElementType(type);
             if (element != null)
             {
@@ -908,7 +906,7 @@ namespace CloverEngine
     /// 帧同步房间消息号配置。引擎层不含具体业务消息号，由业务注入。
     ///
     /// 字段类型为 <c>uint</c>，与 <c>EMsg</c> / <c>IRouter.OnMsg</c> / <c>INetwork.Call|Send</c>
-    /// 的消息号类型保持一致——用 <c>int</c> 会导致每个调用点都要强制转换（曾经的 18 处编译错误）。
+    /// 的消息号类型保持一致——用 <c>int</c> 会导致每个调用点都要强制转换。
     /// 业务侧用整数字面量赋值（<c>Create = 1002001</c>）会自动隐式转换，无需改动。
     /// </summary>
     public class FrameRoomMsgIds

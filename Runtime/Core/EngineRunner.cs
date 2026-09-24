@@ -6,7 +6,7 @@ namespace CloverEngine
     /// 引擎**宿主行为开关**（配合 <see cref="EngineRunner"/> / <c>Game.ConfigureHost</c> 使用）。
     /// <para>
     /// <b>每个字段的默认值 = 引擎现状（"不干预"）</b>：不调用 <c>Game.ConfigureHost</c> 时，
-    /// 宿主的行为与本次下沉之前**逐字一致**（一个字节都不变）。要哪一项就显式打开哪一项。
+    /// 宿主行为不做任何改动（一个字节都不变）。要哪一项就显式打开哪一项。
     /// </para>
     /// <para>
     /// 为什么这三件事属引擎：它们是**每个新项目都要在自建 Bootstrap 里重写一遍**的宿主级动作
@@ -20,7 +20,7 @@ namespace CloverEngine
         /// <summary>
         /// 应用失去焦点后是否继续推进帧循环（对应 <c>Application.runInBackground</c>）。
         /// <para>
-        /// <c>null</c>（默认）= <b>不干预</b>：沿用播放器 / 编辑器当前的设置（= 本次下沉前的行为）。
+        /// <c>null</c>（默认）= <b>不干预</b>：沿用播放器 / 编辑器当前的设置。
         /// </para>
         /// <para>
         /// 什么时候要开：跑自动化验证 / 无人值守截图时，编辑器窗口一失焦，<c>Time.frameCount</c> 就冻住
@@ -57,7 +57,7 @@ namespace CloverEngine
         /// <c>Game.Scene.Load</c> 被销毁 —— 监听器挂在相机上，一切场景就没有监听器了
         /// （Unity 每帧刷一条 "There are no audio listeners in the scene"，实测把 Editor.log 刷到 74MB，
         /// 并把真正的问题全部淹掉）。判据只看"自己身上有没有"，**不看场景里有没有**：
-        /// 场景里那个本来就活不过切场景，拿它当"已存在"的判据正是上面那个坑的成因。
+        /// 场景里那个本来就活不过切场景，拿它当"已存在"的判据会让切场景后监听器消失。
         /// </para>
         /// <para>
         /// ⚠️ <b>代价（要不要开取决于项目）</b>：宿主是原点上的常驻节点，因此**3D 空间音效会按
@@ -136,15 +136,14 @@ namespace CloverEngine
             var go = new GameObject("[CloverEngine]");
             DontDestroyOnLoad(go);
             // AddComponent 会**同步**触发 Awake：守卫开启时由 Awake 把"先到的那个"登记为单例，
-            // 这里再把组件引用赋给 _instance（同值）。守卫关闭时 Awake 不碰 _instance，行为与旧实现一致。
+            // 这里再把组件引用赋给 _instance（同值）。
             _instance = go.AddComponent<EngineRunner>();
         }
 
         /// <summary>
         /// 重复实例守卫 + 监听器归属（**两项都只在 <see cref="EngineHostOptions"/> 里显式打开时才做事**）。
         /// <para>
-        /// 默认（守卫关闭）= 本方法立即返回：<c>_instance</c> 仍只由 <see cref="Ensure"/> 赋值，
-        /// 与本次下沉前逐字一致。
+        /// 默认（守卫关闭）= 本方法立即返回：<c>_instance</c> 仍只由 <see cref="Ensure"/> 赋值。
         /// </para>
         /// </summary>
         private void Awake()
@@ -231,11 +230,6 @@ namespace CloverEngine
 
         /// <summary>
         /// 宿主对象被销毁时的兜底关闭路径（非退出场景：对象被其它代码 Destroy、非常规卸载等）。
-        /// <para>
-        /// 旧实现只有 <see cref="OnApplicationQuit"/>：宿主被其它途径销毁时既不 Shutdown、
-        /// 也不清静态 <c>_instance</c> —— 引擎继续挂在旧实例上且驱动器已消失（无人驱动 Tick），
-        /// 之后再 Ensure 又会造出第二个驱动器，前后状态错乱。
-        /// </para>
         /// </summary>
         private void OnDestroy()
         {

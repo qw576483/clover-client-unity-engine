@@ -200,7 +200,7 @@ namespace CloverEngine
                 {
                     if (!ok)
                     {
-                        // 下载失败时**不删旧文件、不提交清单**：本地保持上一版的完整状态，
+                        // 下载失败时**不删旧文件、不提交清单**：本地保持已安装版本的完整状态，
                         // 避免「清单已指向新版本、文件却没下完」的半更新残局（运行中与下次启动都会白图/缺包）。
                         State = ResourceUpdateState.Failed;
                         onDone?.Invoke(false, error);
@@ -232,7 +232,7 @@ namespace CloverEngine
             }
 
             // 新版本已落地生效，此时才删远端已移除的旧文件与孤儿半成品：
-            // 删除放到成功后，下载中途失败不会破坏仍在使用中的上一版。
+            // 删除放到成功后，下载中途失败不会破坏仍在使用中的版本。
             DeleteStale(info);
 
             State = ResourceUpdateState.Ready;
@@ -244,7 +244,7 @@ namespace CloverEngine
         /// 在途清单请求也要一起收掉：否则引擎拆卸时它既不释放也不回调，请求对象与回调引用一起残留。
         ///
         /// <para>
-        /// <b>接线状态</b>：业务可见入口是公开面 <see cref="IResourceManager.CancelUpdate"/>（本方法的转发），
+        /// <b>调用点</b>：业务可见入口是公开面 <see cref="IResourceManager.CancelUpdate"/>（本方法的转发），
         /// 由业务在「玩家点取消更新」时调用；引擎侧的自动调用点是 <c>Game.Shutdown</c> 的
         /// <c>Res.CancelUpdate</c> 拆卸步骤。半成品按 <c>.part</c> 保留，下次更新可续传。
         /// </para>

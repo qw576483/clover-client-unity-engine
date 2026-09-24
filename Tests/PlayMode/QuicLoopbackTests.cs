@@ -151,8 +151,7 @@ namespace CloverEngine.Tests
             catch (NotSupportedException e)
             {
                 // ★ 只有 ConnectAsync 的"插件不可用"异常（TryEnsureReady 失败时抛 NotSupportedException）
-                //   才属环境缺失、跳过；地址非法（FormatException）等真实故障必须让用例红 ——
-                //   旧实现 catch(Exception) 把一切异常都当"插件缺失" Ignore，真实故障被吞成"跳过"。
+                //   才属环境缺失、跳过；地址非法（FormatException）等真实故障必须让用例红。
                 Assert.Ignore($"QUIC 原生插件不可用（本机未提供 / 加载失败），跳过用例: {e.Message}");
             }
 

@@ -9,7 +9,7 @@ namespace CloverEngine.Tests
     /// <see cref="GridUtil"/> 矩形 → 整数格遍历的单元测试。
     /// <para>
     /// 核心判据 = **与 4 个调用点的手写实现逐格等价**：测试里内联一份
-    /// <see cref="ReferenceOverlap"/>（= super-mario 那四份 `Overlap(Rect)` 的逐字复制），
+    /// <see cref="ReferenceOverlap"/>（= 四份手写 `Overlap(Rect)` 的逐字复制），
     /// 逐个矩形比对"格集合 + 顺序"，而不是只断言元素个数。
     /// </para>
     /// </summary>
@@ -33,8 +33,7 @@ namespace CloverEngine.Tests
         public void TearDown() => LogAssert.ignoreFailingMessages = _prevIgnoreFailingMessages;
 
         /// <summary>
-        /// 参考实现：clover-project-super-mario 的 4 个调用点的逐字复制
-        /// （PlayerActor.cs:1047 / EnemyModule.cs:293 / ItemModule.cs:356 / FireballModule.cs:248）。
+        /// 本文件内联的参考实现：`Overlap(Rect)` 手写逐格遍历（4 个调用点同口径）的逐字复制。
         /// </summary>
         private static List<Vector2Int> ReferenceOverlap(Rect r)
         {

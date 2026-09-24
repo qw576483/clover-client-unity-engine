@@ -171,9 +171,7 @@ namespace CloverEngine
     /// <para>
     /// <b>最小复现</b>：不注册任何来源时 <c>CloverPresentation.EntityView.CreateView(id, spec)</c>
     /// 只可能产出胶囊占位 + 3D 模型；要看 2D 精灵实体，业务必须自己
-    /// <c>new GameObject</c> + <c>AddComponent&lt;SpriteRenderer&gt;</c> + 自己管贴图 / 帧动画 / 排序 / 回收
-    /// （实测参考：`clover-project-diablo2` 的 `Module/View/ViewModule.cs`，
-    /// `EnsureRoot:1296` / `CreateEntityNode:1444` / `DestroyView:1716` / `RefreshAllFrames:1694`）。
+    /// <c>new GameObject</c> + <c>AddComponent&lt;SpriteRenderer&gt;</c> + 自己管贴图 / 帧动画 / 排序 / 回收。
     /// </para>
     /// <para>
     /// <b>修复后自证</b>：注册 <see cref="SpriteEntityViewSource"/>（或任何实现了本接口的类型）后，
@@ -191,7 +189,7 @@ namespace CloverEngine
     /// ④ 注册表是**进程级**的（不是工厂实例级）；建议在 `Game.Launch` 之后的接线钩子里注册一次。
     /// </para>
     /// <para>
-    /// <b>用法 + 首个消费方</b>：
+    /// <b>用法</b>：
     /// <code>
     /// // 2D 项目：整条实体视图链路都走精灵视图
     /// EntityViewFactory.RegisterSource(new SpriteEntityViewSource(layers: myLayers), asDefault: true);
@@ -199,8 +197,6 @@ namespace CloverEngine
     /// // 3D 项目里只想让某类实体走 2D（按自己的资源路径约定筛选）
     /// EntityViewFactory.RegisterSource(new SpriteEntityViewSource(spec =&gt; spec.ModelPath.StartsWith("UI/Icons/")));
     /// </code>
-    /// 首个消费方：`clover-project-diablo2` 的实体视图（`Module/View/ViewModule.cs`），
-    /// 接线由收尾片做（本片只补引擎侧骨架）。
     /// </para>
     /// </summary>
     public interface IEntityViewSource
@@ -232,10 +228,10 @@ namespace CloverEngine
     /// <summary>
     /// 实体视图工厂实现（契约见 <see cref="IEntityViewFactory"/>）。
     ///
-    /// 一次 CreateView 的完整流程（每一步都对应一个已踩过的静默失败）：
+    /// 一次 CreateView 的完整流程（每一步都要拦住一类静默失败）：
     /// <list type="number">
     /// <item>建根节点（命名 <c>Entity_{id}</c>/<c>Self_{id}</c>）—— 位置先可写，实体立刻能参与表现；</item>
-    /// <item>顶一个**中性灰**占位体（不能像角色：用过亮橙色，被当成敌人）；</item>
+    /// <item>顶一个**中性灰**占位体（不能像角色，否则会被当成敌人）；</item>
     /// <item>异步加载模型；回调里先问"实体还在吗" —— 不在就丢弃实例（**竞态**：加载慢于离场）；</item>
     /// <item>按实测包围盒归一化身高 + 底面对齐节点原点（贴地）；</item>
     /// <item>模型到位后立刻移除占位体；</item>

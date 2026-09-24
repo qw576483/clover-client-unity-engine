@@ -98,8 +98,8 @@ namespace CloverEngine
         public bool Force;
 
         // 两个表是**私有** + 只读视图 + 显式追加入口：外部改表必须走 AddFile / AddAsset，
-        // 那样才能就地把惰性索引置空。旧实现是 public List 字段、索引只按 Count 判失效 ——
-        // 外部在"数量不变"的情况下替换或重排元素时索引不重建，Find/FindAsset 静默返回陈旧条目。
+        // 那样才能就地把惰性索引置空（否则在"数量不变"的情况下替换或重排元素时索引不重建，
+        // Find/FindAsset 会静默返回陈旧条目）。
         private readonly List<ResourceFileInfo> _files = new();
         private readonly List<ResourceAssetEntry> _assets = new();
         private readonly ReadOnlyCollection<ResourceFileInfo> _filesView;
@@ -480,7 +480,7 @@ namespace CloverEngine
     ///   <item><b>配热更</b>：从 <see cref="ManifestUrl"/> 拉清单，差异下载到 <see cref="ContentDir"/>，
     ///   之后所有加载走 AssetBundle 后端。</item>
     /// </list>
-    /// 因此**接入热更是显式的**：不配就是老行为，不会有「悄悄换了后端」这种意外。
+    /// 因此**接入热更是显式的**：不配就保持默认后端，不会有「悄悄换了后端」这种意外。
     /// </remarks>
     public sealed class ResourceModuleConfig
     {

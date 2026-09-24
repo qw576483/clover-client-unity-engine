@@ -2,21 +2,12 @@
 // CloverEngine · Editor/PixelArtImportSettings.cs
 // 像素素材导入规范（配置资产）：规则表 + 一套像素画纹理设置。
 //
-// 出处（语义与"坑"逐条照搬，⛔ 不含任何项目专属目录/数值）：
-//   clover-project-super-mario `client/Assets/Editor/SpriteImportPostprocessor.cs:20-64`
-//   —— 那份是**写死目录**的（`/Resources/Sprites/`、`/Sprites/Mario/`…），且"开关"就是
-//      "文件存在即生效"。下沉时必须去掉这两点：
-//      ① 目录一律来自本资产的 <see cref="Rules"/>（规则表同时是**作用域**：不在表里的纹理一律不碰）；
-//      ② **默认不生效** —— 本资产不存在 / 未被 `Clover/像素素材导入/创建或选择配置资产…` 选中 /
-//         总开关（EditorPrefs，默认关）未打开 ⇒ 后处理器直接 return。
-//      原因：同一台机器上会有多个工程，后处理器是**全局**的；默认生效会悄悄改掉别的工程的导入设置。
-//
 // ⛔ 刻意**不提供** `[CreateAssetMenu]`：从 Assets 菜单凭空建出来的资产不会在 EditorPrefs 里登记，
 //    后处理器看不见它 —— 那是一个"建了但没生效"的静默陷阱。本资产**只**由菜单项
 //    `Clover/像素素材导入/创建或选择配置资产…` 创建/选择（创建后即登记）。
 //
 // 为什么这层配置要落在资产里而不是写死在脚本里：素材是**美术产物**，一批几百张，
-// 手设必漏；而漏设的症状是"某几张图糊了 / 人物浮在半空"，极难查（出处文件开头的三条后果）。
+// 手设必漏；而漏设的症状是"某几张图糊了 / 人物浮在半空"，极难查。
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System;
@@ -27,7 +18,7 @@ using UnityEngine;
 namespace CloverEngine.Editor
 {
     /// <summary>
-    /// 轴心对齐方式（两套，覆盖参考实现的两种）。
+    /// 轴心对齐方式。
     /// </summary>
     public enum PixelArtPivot
     {
@@ -68,10 +59,6 @@ namespace CloverEngine.Editor
 
     /// <summary>
     /// **切图规则**：把一个 PNG 切成多张子精灵（`SpriteImportMode.Multiple`）。
-    /// <para>为什么要有它：引擎原先只做「整张图怎么导」（导入参数 / 目录规则 / 导入模式），
-    /// 「一张图切成 N 张」被明文划给了"切图工具" ⇒ 每个工程都得自己写一遍
-    /// （diablo2 的 `Assets/Editor/AssetImporter.cs` 就是这套：多帧条带 + 位图字体格子 + 九宫格边框）。
-    /// 本规则把三者做成**配置驱动的数据**，代码侧零项目专有素材名。</para>
     /// <para>⛔ 默认**没有任何规则** ⇒ 行为与加它之前完全一致（opt-in）。</para>
     /// </summary>
     [Serializable]
@@ -150,11 +137,7 @@ namespace CloverEngine.Editor
         /// </para>
         /// <para>
         /// <b>为什么必须有这一项</b>：<see cref="SpriteImportMode.Single"/> 与
-        /// <see cref="SpriteImportMode.Multiple"/> 混居的工程用全局单值**不安全** ——
-        /// 参考实现（`clr-project-cr`）就是这种：逐帧单位目录是"一张 PNG 一个精灵"，
-        /// 而竞技场目录（23 PNG → 25 Sprite）与塔目录（214 PNG → 236 Sprite）是**多子精灵**。
-        /// 全局设成 Single 会把后者的切图整片改坏（多子精灵被拍平成一个）；全局设成 Multiple
-        /// 又会让逐帧单位的逐帧数据全丢。⇒ 作用域必须能**逐目录**表达。
+        /// <see cref="SpriteImportMode.Multiple"/> 混居的工程用全局单值**不安全**。
         /// </para>
         /// </summary>
         [Tooltip("勾上 = 本目录用下面的 ImportMode；不勾 = 沿用配置里的全局 ImportMode")]
@@ -241,11 +224,6 @@ namespace CloverEngine.Editor
         // ── 纹理设置（像素画）────────────────────────────────────────────────
         /// <summary>
         /// 每单位像素数：决定"多少像素 = 1 世界单位"。
-        /// <para>
-        /// ⛔ 这里给 Unity 自己的默认值 <c>100</c>，**不预设**任何参考实现的数值
-        ///（参考实现写死 16，那是"一格 16px 的素材"专属值）。用错的表现是角色比瓦片大/小 100 倍，
-        /// 所以必须按素材显式配置。
-        /// </para>
         /// </summary>
         [Tooltip("每单位像素数（按素材配；Unity 默认 100。填错会让贴图相对世界尺寸放大/缩小）")]
         public int PixelsPerUnit = 100;

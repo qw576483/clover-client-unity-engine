@@ -4,7 +4,7 @@ namespace CloverEngine
 {
     /// <summary>
     /// 视点晃动（view bob）的**数值口径**。七个字段全部由业务传入 ——
-    /// 引擎不内置任何项目取值（出处的数值真源在业务侧：幅度 / 频率 / 满幅基准速度来自项目常量，
+    /// 引擎不内置任何项目取值（数值真源在业务侧：幅度 / 频率 / 满幅基准速度来自项目常量，
     /// 增益与衰减速度、横滚角、落地沉降来自项目的战斗手感表）。
     /// </summary>
     public struct ViewBobConfig
@@ -35,17 +35,14 @@ namespace CloverEngine
     /// 第一人称的视点晃动与落地沉降 —— **纯逻辑**（刻意**不是** <c>MonoBehaviour</c>：
     /// 无 Unity 生命周期依赖 ⇒ 可离线断言、可被任意持有者驱动）。
     ///
-    /// <para><b>出处</b>：能力下沉。搬自 <c>clover-project-cs16</c> 的
-    /// <c>client/Assets/Scripts/Module/CameraRig/ViewBob.cs</c>（**原** 77 行，<b>零业务类型引用</b>；
-    /// 下沉后该项目**已删除该文件**并改用本件）—— 只把当时写死的 7 个常量换成
-    /// <see cref="ViewBobConfig"/>；**逐字搬移、一个分支都没改**
-    /// —— 那套数值与分支是已验收的手感，⛔ 不许"顺手修正"。</para>
+    /// <para><b>零业务类型引用</b>：7 个数值经 <see cref="ViewBobConfig"/> 由业务传入，
+    /// 引擎不内置任何取值 —— ⛔ 不许"顺手修正"这套数值与分支。</para>
     ///
     /// <para><b>契约：只输出偏移，不碰相机</b>。由调用方决定怎么用；典型的第一人称相机把它当作
     /// "画面局部偏移"叠加到眼睛位置上。特别注意：<b>bob 不影响射线起点 / 视线方向</b> ——
     /// 否则子弹会随脚步左右摆（射线由同一个调用方用不含 bob 的位姿发出）。</para>
     ///
-    /// <para><b>语义（照搬原实现，逐条）</b>：</para>
+    /// <para><b>语义（逐条）</b>：</para>
     /// <list type="number">
     /// <item><c>dt &lt;= 0</c> 直接返回（不推进任何状态）；</item>
     /// <item>目标振幅 = 速度 / <see cref="ViewBobConfig.FullAmplitudeSpeed"/> 并夹到 0~1；</item>

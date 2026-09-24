@@ -130,14 +130,11 @@ namespace CloverEngine.Tests
 
         // ───────────────────────── WorldHpBar：渲染顺序（D129b 回归用例） ─────────────────────────
         //
-        // 缺陷：WorldHpBar 的两个 Quad 从不写 sortingOrder ⇒ 恒为 0，而业务侧单位精灵常在 1000+
-        //       ⇒ 血条被自己单位的精灵盖住（"时有时无、贴脸才看得见"，不报错）。
         // 本用例断言：传入的 sortingOrder 必须**落到两个 Quad 的 MeshRenderer 上**（Bg / Fill）。
-        // 修复前该用例无法通过（参数不存在 / 值为 0）。
         // 注：`Create` 内部走 `GameObject.CreatePrimitive` + `Object.Destroy`（编辑器下会打一条
         //     "Destroy may not be called from edit mode"，属测试环境噪声），故忽略日志断言。
 
-        /// <summary>未传 sortingOrder 时必须保持旧行为（0）—— 其它消费方（如 diablo2）不受影响。</summary>
+        /// <summary>未传 sortingOrder 时必须保持默认排序值（0）—— 其它消费方不受影响。</summary>
         [Test]
         public void WorldHpBar_DefaultSortingOrder_IsZero()
         {

@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace CloverEngine
 {
-    // 契约（ICameraManager）已下沉到 Runtime/Core/PresentationContracts.cs。
+    // 契约（ICameraManager）见 Runtime/Core/PresentationContracts.cs。
 
     /// <summary>
     /// 相机管理器实现，基于 SmoothDamp 实现跟随，并通过钳位实现边界约束
@@ -20,7 +20,7 @@ namespace CloverEngine
         private float _shakeIntensity;
         private float _shakeTimer;
 
-        // 缓存主相机：原实现每帧 Camera.main（带 tag 查找语义），是可避免的静态查找开销。
+        // 缓存主相机：避免每帧 Camera.main 的静态 tag 查找开销。
         private Camera _cam;
         // 平滑跟随的"基准位置"：震动作为一次性视觉偏移叠加，绝不写回基准（否则震动位移会被
         // 下一帧的 SmoothDamp 当成跟随起点累加，跟随与震动互相污染）。
@@ -123,7 +123,7 @@ namespace CloverEngine
                 }
                 else
                 {
-                    // 透视投影没有 orthographicSize（原实现拿它算半宽高，钳位结果无意义）：
+                    // 透视投影没有 orthographicSize（拿它算半宽高，钳位结果无意义）：
                     // 用 FOV × 相机到目标平面（取目标 z）的距离估算可视半高。
                     var planeZ = _target != null ? _target.position.z : 0f;
                     var dist = Mathf.Max(0.1f, Mathf.Abs(cam.transform.position.z - planeZ));

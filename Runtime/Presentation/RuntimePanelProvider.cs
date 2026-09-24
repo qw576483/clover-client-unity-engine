@@ -2,8 +2,7 @@
 // CloverEngine · Runtime/Presentation/RuntimePanelProvider.cs
 // 「零资产」的运行时面板供给者：按类名反射造面板模板 → 交给 `UIManager` 克隆。
 //
-// 来源：clover-project-cr `client/Assets/Scripts/UI/PanelFactory.cs:41-216`
-//   （该工程里的 `PanelFactory` 静态类，架构契约 D2 方案①）。原注释里记着它成立的**引擎侧依据**：
+//   本件成立的**引擎侧依据**：
 //   `UIManager.Open<T>` 的取面板链路 = 「拿一个 GameObject（`CloverPresentation.PanelProvider(类名)`，
 //   默认实现是 `Resources.Load<GameObject>("UI/" + 类名)`）→ `Instantiate` → `GetComponent<T>()`」
 //   （`Runtime/Presentation/UI.cs:131-149`），而 `CloverPresentation.PanelProvider` 的签名是
@@ -11,7 +10,7 @@
 //   （`Runtime/Presentation/CloverPresentation.cs:69`）—— 一个**公开可写**的函数槽。
 //   ⇒ 「运行时 new GameObject + AddComponent」这条路径成立，且不需要任何 `.prefab` 资产。
 //
-// ═══════════════ 为什么落到引擎（四条要点，每条都有事故出处） ═══════════════
+// ═══════════════ 四条要点 ═══════════════
 //
 // ① **反射按类名找面板类型**（而不是写 `switch`）：函数槽只给得到字符串。写 `switch` 的话
 //    每加一个面板都要回来改这个文件（它是引擎件、属公共地盘）⇒ 反射让"加面板 = 只加自己的文件"。
@@ -27,11 +26,10 @@
 // ③ **按"当前总线对象"做幂等安装**：`CloverPresentation.PanelProvider` 是**静态**槽，而工程常
 //    关闭域重载（Enter Play Mode Options）⇒ 裸 `bool _installed` 会**跨轮存活**：新一轮 Play 里它
 //    仍是 true、`Install()` 直接早退，而静态槽可能已随引擎重建被清掉 ⇒ 之后每次 `Game.UI.Open`
-//    都去找 `Resources/UI/{类名}.prefab` 并失败（表现为"面板打不开 / 点了没反应"）——
-//    这是实测到的**僵尸会话**的一个成因面（托管侧被整体复位、静态残留）。
+//    都去找 `Resources/UI/{类名}.prefab` 并失败（表现为"面板打不开 / 点了没反应"）。
 //    ⇒ 标识本轮用"**当前总线对象**"（`Game.Launch` 每轮新建 `EventBus`，见 `Runtime/Core/Game.cs`
 //    的 Launch 路径），与工程其余订阅方口径一致。
-//    ➕ 本件比参考实现多一条**自愈**：同一条总线时若发现静态槽里的委托**不是本实例的那个**
+//    ➕ 同一条总线时若发现静态槽里的委托**不是本实例的那个**
 //    （被别的代码清掉 / 覆盖 / 域重载边缘），就重新装一次 —— 而不是直接早退。
 //
 // ④ **面板必须自己在 `OnOpen` 里建视觉树**（⛔ 不要放 `Awake` / `Start`）：
@@ -76,7 +74,7 @@ namespace CloverEngine
 {
     /// <summary>
     /// 运行时面板供给者：给 <see cref="CloverPresentation.PanelProvider"/> 装一个"按类名反射造面板"的实现，
-    /// 使 <c>Game.UI.Open&lt;T&gt;</c> **不再依赖** <c>Resources/UI/{类名}.prefab</c> 资产。
+    /// 使 <c>Game.UI.Open&lt;T&gt;</c> **不依赖** <c>Resources/UI/{类名}.prefab</c> 资产。
     /// <para>
     /// <b>用法</b>：
     /// <code>
@@ -90,7 +88,7 @@ namespace CloverEngine
     /// <para>
     /// <b>必须在 <c>Game.Launch</c> 之后调用</b>：此前 `Game.Event` 为空 ⇒ `Install` 记一条 Error 并返回
     /// （⛔ 不静默，否则表现为"所有面板都去找 prefab 且找不到"）。
-    /// 也必须在**第一次 `Game.UI.Open`** 之前 —— 晚装只影响之后打开的面板，早先那次会因为找不到
+    /// 也必须在**第一次 `Game.UI.Open`** 之前 —— 晚装只影响之后打开的面板，在它之前打开的那次会因为找不到
     /// prefab 而报 "Panel prefab not found"。
     /// </para>
     /// <para><b>本件不持有面板实例</b>：它只负责"造一个模板交给 `UIManager` 克隆"，面板的生命周期

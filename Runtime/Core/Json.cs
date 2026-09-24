@@ -52,19 +52,18 @@ namespace CloverEngine
         /// <para>加固（对齐 Parse 侧的 <see cref="MaxDepth"/>）：</para>
         /// <list type="bullet">
         /// <item><b>循环引用 + 深度保护</b>：递归时携带「当前路径」的引用集合，自引用对象直接报
-        /// <see cref="FormatException"/>，深度超过 <see cref="MaxDepth"/> 同样报错 ——
-        /// 旧实现没有这两层保护，对象图成环会一路递归到 StackOverflowException（不可捕获、进程直接崩）。</item>
-        /// <item><b>float 不再先提升成 double</b>：按 float 自己的最短可往返格式输出，
-        /// 不会再把 1.1f 打印成 1.100000023841858（那是 float→double 的精确值）。</item>
+        /// <see cref="FormatException"/>，深度超过 <see cref="MaxDepth"/> 同样报错
+        /// （否则对象图成环会一路递归到 StackOverflowException —— 不可捕获、进程直接崩）。</item>
+        /// <item><b>float 保型输出</b>：按 float 自己的最短可往返格式输出，
+        /// 1.1f 不会被打印成 1.100000023841858（那是 float→double 的精确值）。</item>
         /// <item><b>浮点保型</b>：整数值的 double（如 1.0）输出为 <c>1.0</c> 而不是 <c>1</c>，
         /// 这样 Parse 回来仍是 double（否则会被 ParseNumber 读成 long，类型信息丢失）。</item>
         /// <item><b>枚举 / DateTime / DateTimeOffset / TimeSpan 加引号</b>：它们走
         /// <c>Convert.ToString</c> 时会输出不带引号的裸文本（如 <c>2024-01-01 00:00:00</c>），
-        /// 那是非法 JSON；现在统一按字符串输出（TimeSpan 不实现 IConvertible，原本还会落到
-        /// default 分支抛 ArgumentException）。</item>
+        /// 那是非法 JSON；现在统一按字符串输出（含不实现 IConvertible 的 TimeSpan）。</item>
         /// <item><b>键序稳定</b>：对象键按 <see cref="StringComparer.Ordinal"/> 排序后输出，
-        /// 同一份数据每次序列化结果一致（旧实现直接 foreach 字典，顺序取决于字典内部布局，
-        /// 增删/rehash 后会变，造成 diff 噪音与内容哈希不稳定）。</item>
+        /// 同一份数据每次序列化结果一致（否则顺序取决于字典内部布局，增删/rehash 后会变，
+        /// 造成 diff 噪音与内容哈希不稳定）。</item>
         /// </list>
         /// </summary>
         public static string Dump(object value)
@@ -157,7 +156,7 @@ namespace CloverEngine
                 return;
             }
             // 必须按 float 自己的最短可往返格式输出：
-            // 旧实现先提升为 double 再打印，1.1f 会变成 1.100000023841858（float→double 的精确值）。
+            // 先提升为 double 再打印会把 1.1f 印成 1.100000023841858（float→double 的精确值）。
             sb.Append(EnsureFraction(f.ToString("R", CultureInfo.InvariantCulture)));
         }
 
@@ -498,7 +497,7 @@ namespace CloverEngine
                 var code = Convert.ToInt32(_json.Substring(_pos, 4), 16);
                 _pos += 4;
                 
-                // 修复bug：正确处理代理对（surrogate pair）
+                // 正确处理代理对（surrogate pair）
                 // 检查是否是高代理项（U+D800~U+DBFF），如果是，需要继续解析低代理项
                 if (code >= 0xD800 && code <= 0xDBFF)
                 {

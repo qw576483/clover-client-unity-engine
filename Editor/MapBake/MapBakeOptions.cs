@@ -50,11 +50,6 @@ namespace CloverEngine.Editor
         /// <summary>
         /// 可行走性取样柱体的底面，**相对地面顶面（GroundTopY）的高度**（米）：实际世界 Y = GroundTopY + ProbeBottomY。
         /// 须严格 &gt; 0（即底面严格高于地面，避免把地面自身算成障碍）。
-        /// <para>
-        /// 语义修正：旧实现按**绝对 Y** 解释（默认 0.2~2.2）—— 地面 Y≠0 的关卡（如地面在 10m）
-        /// 取样柱整根埋在地下，逐格都不与障碍相交，会烘出"全可走"空地图且无告警；
-        /// 改为相对地面后默认值在任何地面高度都可用。
-        /// </para>
         /// </summary>
         public float ProbeBottomY = 0.2f;
 
@@ -72,7 +67,7 @@ namespace CloverEngine.Editor
 
         /// <summary>
         /// 层过滤开关。<b>默认 false = 现状行为</b>：场景里所有"非地面"碰撞体都参与阻挡烘焙，
-        /// 产出与加这个开关之前**逐字节一致**（旧工程不改参数 ⇒ 结果不变）。
+        /// 产出与加这个开关之前**逐字节一致**（不改参数 ⇒ 结果不变）。
         /// </summary>
         public bool LayerFilterEnabled;
 
@@ -109,7 +104,7 @@ namespace CloverEngine.Editor
         public string SpawnMarkerPrefix = "Spawn";
 
         /// <summary>
-        /// **命名标记点**的根对象名（场景里的根对象，如 cs16 的 <c>Level/Markers</c> 那个 <c>Markers</c>）：
+        /// **命名标记点**的根对象名（场景里的某个根对象名，如 <c>Markers</c>）：
         /// 该根下每个子物体的**对象名 = 标记名、世界坐标 = 点位**，随同一份 .bytes 导出
         /// （见 <c>CloverMapFormat.FlagMarkers</c>；客户端用 <c>Game.Map.GetPoints(名字)</c> 取）。
         /// <para>

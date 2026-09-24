@@ -25,40 +25,30 @@
 //   一句话：`TileWorld` 说"能不能站"，`IsoLayout` 说"格在哪"，`TileNodePool` 说"节点从哪来"，
 //   `TileRenderState` 说"一格写成什么样"，**本件是唯一把最后两件事接起来的那一层**。
 //
-// 出处（算法与分支逐条照搬，⛔ 未改语义；原实现的项目语义部分**没有**下沉）：
-//   clover-project-diablo2 · client/Assets/Scripts/Module/Map/MapView.cs
-//     · 1801-1840  `PlanCell` —— "一格要画什么"的规划（本件只下沉**计划的骨架 + 节点数**）
-//     · 1848-1873  `ApplyCellPlan` —— 计划落地（本件 = `ApplyPlan`）
-//     · 2401-2411  `ApplyTileState` —— 状态 → 渲染器，**无条件写全**（本件 = `Apply`）
-//     · 2418-2463  `GroundState` / `ObjectState` / `FogState` / `LocalScaleFor` / `ColorFor`
-//                  （本件 = 一个 `StateOf` + `LocalScaleFor` / `ColorFor`）
-//     · 2483-2502  `PlaceOfPx` —— 像素对齐内核（地砖顶边贴格中心上方半格 / 墙底边贴下方半格）
-//   ⛔ 未下沉（属题材，留在调用方）：瓦片分类 / 区域 / 素材键 / 逐格覆盖 / 水面不叠 / 实心岩体不画 /
-//     各层排序偏移 / 占位配色 / 每单位像素数 —— 全部经参数与委托进来，本件不预设任何一组取值。
+// ⛔ 含题材语义、不在本件（留在调用方）：瓦片分类 / 区域 / 素材键 / 逐格覆盖 / 水面不叠 / 实心岩体不画 /
+//   各层排序偏移 / 占位配色 / 每单位像素数 —— 全部经参数与委托进来，本件不预设任何一组取值。
 //
 // <para><b>最小复现（为什么必须有"无条件写全"这一步）</b>：节点池复用节点时，若渲染方写成
 //   "记得就重设、漏了就继承上一次"，则第二张图会带着第一张图的贴图 / 颜色 / 排序号出现；
 //   再叠加 `enabled` 不复位（遮蔽层节点被业务置 `false`）⇒ 复用到它的一格**静默不可见**。
 //   两处都不报错、不打日志。</para>
 // <para><b>自证</b>：① `StateOf` 是纯函数（不碰 `SpriteRenderer`、不读全局、不建节点）⇒ 调用方
-//   可离线逐格复算并与改前对拍（本项目走 `mapcheck` 的重铺等价断言）；② `Apply` 内**没有**
+//   可离线逐格复算（重铺等价断言）；② `Apply` 内**没有**
 //   "是不是复用节点"的分支（一个字都没有）⇒ 「逐项相等」是结构性保证而不是"人记得"；
 //   ③ `Build` 与 `ApplyPlan` 返回的新建节点数**恒等于** `TileCellPlan.NodeCount`（帧预算按它扣）。</para>
 // <para><b>已知边界 / 精度限制</b>：① 本件**不是** MonoBehaviour、无 `Update`、不注册回调 ⇒
 //   由调用方驱动（逐格渲染本来就是调用方的循环）；② `StateOf` 的 sprite 为 `null` 时位置**恒等于**
-//   格中心（占位菱形与格同心，不做对齐修正）—— 这是原口径；③ 像素对齐用的是"图的**高**"，
+//   格中心（占位菱形与格同心，不做对齐修正）—— 该口径固定，⛔ 不按 sprite 尺寸修正；③ 像素对齐用的是"图的**高**"，
 //   ⛔ 与图的**宽**无关（等距格图必须按格宽裁切，宽度的对齐由素材侧负责）；
 //   ④ `_tilePixelsPerUnit` 是"一张格图在世界单位下的像素高"的解释比例，改它等于改所有已有素材的观感
 //   ⇒ 只在换素材规格时改；⑤ 本件**不做**视锥裁剪 / 分块调度 / 贴图异步请求 —— 那些是调用方的策略。</para>
-// <para><b>用法 + 首个消费方</b>：
+// <para><b>用法</b>：
 //   <code>
 //   var r = new TileRenderer(iso, pixelsPerUnit, tilePixelsPerUnit);
 //   var st = r.StateOf(cell, TileLayer.Ground, sprite, placeholderColor, sortOffset, sortBias);
 //   var node = r.Build(pool.Take, groundParent, st);      // 取 + 无条件写全
 //   </code>
-//   首个消费方 = `clover-project-diablo2` 的 `Module/Map/MapView.cs`（`GroundState` / `ObjectState` /
-//   `FogState` / `ApplyTileState` / `ApplyCellPlan` 五处将改为薄转发）。业务还要接的线 = 该项目的
-//   `mapcheck` 宿主（纯函数对拍 + 节点数断言）。</para>
+//   离线宿主可做纯函数对拍 + 节点数断言。</para>
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System;
@@ -271,7 +261,7 @@ namespace CloverEngine
             return new Vector3(cellCenter.x, cellCenter.y + dy, cellCenter.z);
         }
 
-        /// <summary>该格 + 层偏移的排序值（薄转发 <see cref="IsoLayout.SortOrder(int,int,int)"/>，避免调用方自己拼）。</summary>
+        /// <summary>该格 + 层偏移的排序值（转调 <see cref="IsoLayout.SortOrder(int,int,int)"/>，避免调用方自己拼）。</summary>
         public int SortOrder(Vector2Int cell, int layerOffset)
         {
             return Iso.SortOrder(cell.x, cell.y, layerOffset);
@@ -282,7 +272,7 @@ namespace CloverEngine
         /// <summary>
         /// ★ 一格的**渲染状态**（纯函数：不建节点、不碰 <see cref="SpriteRenderer"/>、不读全局）。
         /// <para>三层的差别只剩"对齐方式"（由 <paramref name="layer"/> 决定）与调用方给的
-        /// 占位色 / 排序参数 ⇒ `GroundState` / `ObjectState` / `FogState` 三种调用合成本方法一种。</para>
+        /// 占位色 / 排序参数 ⇒ 地面 / 物件 / 遮蔽三种调用合成本方法一种。</para>
         /// </summary>
         /// <param name="cell">格坐标。</param>
         /// <param name="layer">渲染层（决定对齐：<see cref="TileLayer.Ground"/> = 地砖式）。</param>
@@ -357,7 +347,7 @@ namespace CloverEngine
         /// ★ 把一格的**计划**落地（= 逐层 <see cref="Build"/>），返回本格**新建的节点数**
         /// （恒等于 <see cref="TileCellPlan.NodeCount"/>；<c>Draw == false</c> ⇒ 0）。
         /// <para>⛔ 遮蔽层（迷雾 / 遮罩）**不在这里**：它由"这一格是否已探索"驱动，不属于渲染计划
-        /// ⇒ 调用方另调 <see cref="StateOf"/> + <see cref="Build"/>（口径见文件头的「出处」一节）。</para>
+        /// ⇒ 调用方另调 <see cref="StateOf"/> + <see cref="Build"/>。</para>
         /// <para>顺序固定为「地面 → 物件」（兄弟序 = 格序 ⇒ 同 `sortingOrder` 时的平局结果确定）。</para>
         /// </summary>
         /// <param name="plan">本格计划。</param>

@@ -5,19 +5,15 @@
 // 为什么需要（引擎侧缺口）：UIManager.Open<T>() 要求预制体**已存在**于
 //   `Resources/UI/{typeof(T).Name}`（Runtime/Presentation/UI.cs:131-140：找不到就
 //   Error "Panel prefab not found" 并 return，面板打不开），于是**每个工程都得自己写一遍生成器**。
-//   出处：clover-project-super-mario `client/Assets/Editor/ProjectBuilder.cs:23-126`
-//   （那份把面板类型写成一个 `typeof(X)` 数组手登记 + 手挂组件 + 自检），本件把这一步下沉，
-//   并把"手登记"换成**反射扫描 IUIPanel 实现**（理由见下）。
 //
 // ⛔ **不改 CloverPresentation.PanelProvider 的默认行为**：存量工程依赖"缺预制体 = 报错"
 //   （那比静默开出一个空面板好定位）。本件是**新增的开发期工具**，不参与运行时分发。
 //
-// 为什么用反射扫描而不是手写类型表（出处那份的做法）：
-//   出处注释自己写明了代价 —— "新增面板时**必须**在这里登记，否则 Resources/UI 下没有预制体，
-//   运行时 Game.UI.Open 会报 Panel prefab not found"。手登记表漏一行的症状是**运行时**才出现，
+// 为什么用反射扫描而不是手写类型表：
+//   手登记表漏一行的症状是**运行时**才出现，
 //   而扫描把"登记"这一步彻底去掉。代价是同名类型要显式报错（见 Build 的重名检查）。
 //
-// 两个必须保留的坑（出处 60-119 行的注释，实测踩过）：
+// 两处注意：
 //   ① **根节点必须铺满父层**：新建 RectTransform 默认是 anchor(0.5,0.5)+sizeDelta(100,100)，
 //      不撑开则面板根只有 100×100，而面板内容按"铺满父节点"建的 ⇒ 整屏 UI 缩成中央一小块。
 //   ② **存盘后必须校验 `m_Script` 引用非 0**：脚本尚未导入时 SaveAsPrefabAsset 会把
@@ -133,8 +129,8 @@ namespace CloverEngine.Editor
         {
             EnsureFolder(UiDir);
 
-            // 与出处同样的前置：轻量 Refresh，让刚编译完的脚本先进 AssetDatabase
-            //（⛔ 不用 ForceSynchronousImport：那会重导整个工程，出处实测能把批处理跑到超时）。
+            // 轻量 Refresh，让刚编译完的脚本先进 AssetDatabase
+            //（⛔ 不用 ForceSynchronousImport：那会重导整个工程）。
             // 真正兜住"脚本还没导入"的是下面每个类型的三关校验，不是这次 Refresh。
             AssetDatabase.Refresh();
 
@@ -192,7 +188,7 @@ namespace CloverEngine.Editor
             var go = new GameObject(type.Name, typeof(RectTransform));
             try
             {
-                // ★ 坑 ①：根节点必须铺满父层（锚点/偏移全 0），否则面板内容只铺成 100×100
+                // ★ 注意 ①：根节点必须铺满父层（锚点/偏移全 0），否则面板内容只铺成 100×100
                 var rt = go.GetComponent<RectTransform>();
                 rt.anchorMin = Vector2.zero;
                 rt.anchorMax = Vector2.one;
@@ -228,7 +224,7 @@ namespace CloverEngine.Editor
                 UnityEngine.Object.DestroyImmediate(go);       // 只留资产，不留场景里的临时对象
             }
 
-            // ★ 坑 ②：存盘后三关校验 —— 坏预制体"编译不报错、运行时组件为 null"
+            // ★ 注意 ②：存盘后三关校验 —— 坏预制体"编译不报错、运行时组件为 null"
             var saved = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
             if (saved == null)
             {

@@ -3,26 +3,15 @@
 // 通用 **sprite-swap 按钮**工厂：常态 / 悬停 / 按下 / 禁用各一张 sprite，尺寸 / 位置 / 文案 / 色调
 // 全部由调用方给（⛔ 引擎不含任何项目配色 / 尺寸 / 素材名）。
 //
-// 出处：clover-project-diablo2 `client/Assets/Scripts/UI/UiArt.cs`
-//   · `Button`（`:346-387`）——「引擎 `UIFactory.CreateButton` 造骨架 + 文字样式 + 四态底图」；
-//   · `ButtonSpritesFor`（`:401-438`）——「按调用方的尺寸挑哪一套底图」是**纯函数**（离线可断言）；
-//   · `OrigButton`（`:687-718`）——「底图由调用方给**路径前缀**，帧序 = 常态 / 按下」；
-//   · `SquareButton`（`:625-647`）——「底图由调用方后贴，本件只保证定尺 + 命中区 + 文字」；
-//   · `ApplyButtonFrame`（`:1152-1184`）—— SpriteSwap 的落地写法：
-//     `btn.transition = Selectable.Transition.SpriteSwap` + `spriteState = new SpriteState { … }`，
-//     并把 `selectedSprite` 一并指到悬停帧（键盘/手柄选中与鼠标悬停表现一致）。
-//
-// 为什么下沉：引擎既有 `UIFactory.CreateButton`（`Runtime/Presentation/UIWidgets.cs:169-187`）**只造纯色按钮**
-//   —— 它没有"按状态换 sprite"这条路，也没有"一张横排条带切 N 个状态"这条路。凡是接了原版 UI 素材的
-//   项目都要自己再写一遍「找 Label → 设 transition → 填 SpriteState → 条带取帧 → 缺图兜底」，
-//   而其中**最容易踩的是缺图那条**：`SpriteState` 字段留 `null` 时 Unity 的 `Selectable.DoSpriteSwap`
+// 为什么要有本件：`UIFactory.CreateButton`（`Runtime/Presentation/UIWidgets.cs:169-187`）**只造纯色按钮**
+//   —— 没有"按状态换 sprite"这条路，也没有"一张横排条带切 N 个状态"这条路。
+//   其中缺图那条要注意：`SpriteState` 字段留 `null` 时 Unity 的 `Selectable.DoSpriteSwap`
 //   会**直接早退**（画面停在上一张图 / 常态），于是"素材没同步好"表现成"悬停按下去没反应"，**零报错**。
 //   ⇒ 本件把"缺失**不静默**"钉进实现（见下）。
 //
-// 缺失 sprite 的处理口径（照参考实现的意图，但把"静默"补成"留痕"）：
+// 缺失 sprite 的处理口径（缺失**必须留痕**，⛔ 不静默）：
 //   · **常态缺失**（= 整组没底图）⇒ **保留调用方给的占位底色**，一个字段都不动，
-//     并 `LogThrottle.WarnOnce` 点名一次（这是参考实现 `ApplyButtonFrame:1162-1163`
-//     "整条缺失：保持纯色块"的语义 + 留痕）；
+//     并 `LogThrottle.WarnOnce` 点名一次（语义 = "整条缺失：保持纯色块" + 留痕）；
 //   · **悬停 / 按下 / 禁用缺失** ⇒ **回落常态帧**（⛔ 不把 `null` 填进 `SpriteState` —— 见上"静默"），
 //     且**不告警**：只有常态/按下两态的按钮是常见素材形态，那不算缺陷（口径写在这里，⛔ 不是"悄悄吞掉"）。
 //
@@ -113,7 +102,7 @@ namespace CloverEngine
             /// <summary>按下贴图；<c>null</c> ⇒ 回落常态。</summary>
             public readonly Sprite Pressed;
 
-            /// <summary>禁用贴图；<c>null</c> ⇒ 回落常态（只灰化文字的做法见参考实现的 <c>SetInteractable</c>）。</summary>
+            /// <summary>禁用贴图；<c>null</c> ⇒ 回落常态（只灰化文字的做法见 <c>SetInteractable</c>）。</summary>
             public readonly Sprite Disabled;
 
             /// <summary>贴图到位后套的色调（<see cref="Image.color"/> 的乘法因子）。</summary>
@@ -291,7 +280,7 @@ namespace CloverEngine
             {
                 highlightedSprite = highlighted,
                 pressedSprite = pressed,
-                selectedSprite = highlighted,           // 键盘 / 手柄选中与鼠标悬停同表现（参考实现口径）
+                selectedSprite = highlighted,           // 键盘 / 手柄选中与鼠标悬停同表现
                 disabledSprite = disabled,
             };
 

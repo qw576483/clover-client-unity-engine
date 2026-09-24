@@ -44,7 +44,7 @@ namespace CloverEngine
         /// <inheritdoc/>
         public void Load(string lang)
         {
-            // 修复bug：先检查文件是否存在，再设置语言和清空文本
+            // 先检查文件是否存在，再设置语言和清空文本
             string path;
             string[] lines;
             try
@@ -52,7 +52,7 @@ namespace CloverEngine
                 path = Path.Combine(_dataDir, $"{lang}.tsv");
                 if (!File.Exists(path))
                 {
-                    // 语言文件缺失不能"静默保持旧语言"（原实现只有一条 Warn）：升级为 Error 并写清当前状态，
+                    // 语言文件缺失不能"静默保持旧语言"：必须 Error 并写清当前状态，
                     // 否则表现为「切了语言、文案没变」，排查无处下手。
                     Game.Logger?.Error("Localization",
                         $"{DataPathHint.ComposeNotFoundHint(path)}；语言未切换（保持 {_language ?? "(未加载)"}）");

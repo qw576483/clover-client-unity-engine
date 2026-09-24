@@ -74,7 +74,7 @@ namespace CloverEngine.Samples
         /// <summary>
         /// 组件已销毁（OnDestroy 置位）。async void 的 await 续体在组件销毁后仍会回到主线程执行，
         /// 而 OnDestroy 已调 Game.Shutdown() 把 Game.Net 置空 —— 续体必须据此提前返回，
-        /// 否则访问 Game.Net 抛 NRE（原实现被 catch 吞成「登录异常」文案，写入已无意义）。
+        /// 否则访问 Game.Net 抛 NRE。
         /// </summary>
         private bool _destroyed;
 

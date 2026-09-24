@@ -108,8 +108,8 @@ namespace CloverEngine
                     "WebSocket 在 WebGL 需要浏览器侧桥接（jslib）；当前引擎未提供，请改用原生平台或等待桥接落地");
             }
 
-            // 先校验 URL：非法 URL 在动旧连接**之前**同步抛（旧实现先 DisconnectCore 再校验，
-            // 传入非法 URL 时原可用连接已被拆掉且无回滚）。
+            // 先校验 URL：非法 URL 在动旧连接**之前**同步抛
+            //（否则传入非法 URL 时原可用连接已被拆掉且无回滚）。
             if (!Uri.TryCreate(addr, UriKind.Absolute, out var uri) ||
                 (uri.Scheme != "ws" && uri.Scheme != "wss"))
             {
@@ -337,7 +337,7 @@ namespace CloverEngine
                     }
                     catch (Exception e)
                     {
-                        // 收包失败的具体原因（关闭码/协议错）必须留痕（旧实现只报固定串，线索全丢）
+                        // 收包失败的具体原因（关闭码/协议错）必须留痕
                         if (_running && _generation == gen)
                             HandleLinkFailure(gen, $"ws recv failed: {e.GetType().Name}: {e.Message}");
                         return;
@@ -385,7 +385,7 @@ namespace CloverEngine
             }
             finally
             {
-                // 循环退出（断线/重连/异常）时释放累加器：旧实现从不 Dispose，每次连接都残留一个托管流
+                // 循环退出（断线/重连/异常）时释放累加器：否则每次连接都残留一个托管流
                 acc.Dispose();
             }
         }

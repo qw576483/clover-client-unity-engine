@@ -1,13 +1,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CloverEngine · Runtime/Core/Separation2D.cs
-// 角色间水平推开（防"两个角色站进同一格"）—— 纯函数静态工具，下沉到引擎。
+// 角色间水平推开（防"两个角色站进同一格"）—— 纯函数静态工具。
 //
-// 出处：clover-project-cs16 的 client/Assets/Scripts/Module/Map/CsActorSeparation.cs
-//   （该文件自己写明：本工程本地碰撞只走 2D 位图 + 竖直射线，**没有任何"另一个角色挡不挡"的
-//   判定**，角色预制体上只有服务命中检测用的胶囊、没有 Rigidbody/CharacterController
-//   ⇒ 物理引擎根本不参与角色位移解算 ⇒ 两个角色可以站在同一处）。
-//   引擎全仓在本次改动前对 `Separation|Overlap\(Actor|PushApart` **0 命中** ⇒ 属引擎缺口，
-//   故整体下沉为引擎底座；cs16 的那份实现可退化为对本类的调用。
+// 为什么需要它：位图 + 竖直射线的本地碰撞**不含"另一个角色挡不挡"的判定**，
+//   角色预制体上只有服务命中检测用的胶囊、没有 Rigidbody / CharacterController
+//   ⇒ 物理引擎根本不参与角色位移解算 ⇒ 两个角色可以站在同一处；本件补上这条几何约束。
 //
 // 与原版（GoldSrc）口径的关系：原版每个玩家实体有一个水平包围盒（`origin ± 16×16 units`
 //   = 半宽 0.4064 m，见 HLSDK pm_shared.c 的 player_mins/player_maxs 与 SV_Move 的实体对实体裁剪）
@@ -16,7 +13,7 @@
 //
 // ★ 本类**不是**物理引擎，**不做**也**不许**被拿去当：
 //   · 不做路径规划 / 导航（那是 AStar.cs 的事）；
-//   · 不做碰撞检测（墙体 / 地面 / 视线由位图与射线各管一层，见项目侧 CsMap.ResolveMove）；
+//   · 不做碰撞检测（墙体 / 地面 / 视线由位图与射线各管一层）；
 //   · 不模拟速度、质量、摩擦、冲量（没有时间积分，输入输出都是"位置"）；
 //   · 不处理竖直分层（不在同一层的角色不该互相推，由调用方先按高度筛完再传进来）；
 //   它只回答一件事：**给定一组水平圆，把它们各自挪一点，使两两不再重叠**。
@@ -65,7 +62,7 @@ namespace CloverEngine
     /// **两个入口**（按调用方一次推进几个角色来选）：
     /// ① <see cref="TryResolve"/> —— 一次解开**一整组**（所有人一起挪），用于回合开始 / 传送落点 /
     ///    一次性归一化；② <see cref="TryResolveOne"/> —— 只推**一个**申请位置，其他人视作障碍
-    ///    （= cs16 的 <c>CsMatch.StepActorPhysics</c> 形态：每帧只挪当前这个角色）。
+    ///    （每帧只挪当前这个角色）。
     /// 推开结果**不许**直接采用：调用方要再喂回自己的墙体判定钳一次（⛔ 别把人推进墙里）。
     /// </para>
     /// </summary>
@@ -79,11 +76,9 @@ namespace CloverEngine
         /// （2D 工程 = x/y；3D 工程通常取 x/z，竖直分量由调用方先筛掉）。
         /// </summary>
         /// <remarks>
-        /// 与 cs16 的 <c>CsActorSeparation.ActorCircle</c> 的**唯一差异**：没有 <c>Id</c> 字段。
-        /// 那边用 <c>Id</c> 算"完全重合"时的散开方向 —— 前提是 <c>Id</c> 是唯一 actor id；
-        /// 引擎版**不能**假设调用方一定填了唯一 id（业务常整组填 0 或同阵营同值），
-        /// 若两个同 id 的圆取到同一方向，推完仍然重合 ⇒ 引擎版改用**数组下标**做种子
-        /// （天然两两不同），既保持确定性又不依赖调用方是否填了 id。
+        /// 本件不带 <c>Id</c> 字段：不可能假设调用方一定填了唯一 id（业务常整组填 0 或同阵营同值），
+        /// 若用 id 决定"完全重合"时的散开方向，两个同 id 的圆会取到同一方向、推完仍然重合
+        /// ⇒ 本件改用**数组下标**做种子（天然两两不同），既保持确定性又不依赖调用方是否填了 id。
         /// </remarks>
         public struct Circle
         {
@@ -112,7 +107,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 推开后额外留的缝隙（米）：只推到"刚好相切"会让两个圆在浮点误差上反复判重叠
-        /// ⇒ 每帧各推一丝 ⇒ 位置抖动。留 1 mm 余量（与 cs16 侧同值）。
+        /// ⇒ 每帧各推一丝 ⇒ 位置抖动。留 1 mm 余量（只吸收浮点误差）。
         /// </summary>
         public const float Skin = 0.001f;
 
@@ -156,7 +151,7 @@ namespace CloverEngine
 
             if (count > circles.Length || count > result.Length)
             {
-                // 非预期分支（调用方 bug）：必须留痕，且只说一次 —— 越界访问才是真正的坑。
+                // 非预期分支（调用方 bug）：必须留痕，且只说一次 —— 越界访问才是真正的风险。
                 LogThrottle.ErrorOnce(Tag, "resolve-buffer-too-small",
                     $"TryResolve: count={count} 超过输入/输出缓冲长度（circles={circles.Length}, " +
                     $"result={result.Length}）⇒ 本次不做推开。调用方应传入 count 以内的长度");
@@ -227,7 +222,7 @@ namespace CloverEngine
         /// 只推**一个**申请位置：把它挪到与 <paramref name="others"/> 里每个圆都不重叠
         /// （<paramref name="others"/> 视作**不动的障碍**，不参与被推）。
         /// <para>
-        /// 这是每帧角色推进的形态（= cs16 的 <c>CsMatch.StepActorPhysics</c>：一次只挪当前这个角色）。
+        /// 这是每帧角色推进的形态（一次只挪当前这个角色）。
         /// 与 <see cref="TryResolve"/> 的差异：那里所有人一起挪（各退一半），这里只挪申请方（退全部）。
         /// </para>
         /// <para>

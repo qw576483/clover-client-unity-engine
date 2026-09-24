@@ -44,7 +44,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 查询日志最小间隔（毫秒）：一轮 <c>Scan</c> 会同时打回环 + 广播 + 各网卡子网广播，
-        /// 每个目标一份查询 ⇒ 不限频必然刷屏（同 cs16 <c>CsLanHost.QueryLogIntervalSeconds</c> 的口径）。
+        /// 每个目标一份查询 ⇒ 不限频必然刷屏。
         /// </summary>
         private const int QueryLogIntervalMs = 1000;
 

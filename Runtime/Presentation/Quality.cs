@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace CloverEngine
 {
-    // 契约（QualityTier / QualityConfig / IQualityManager）已下沉到
+    // 契约（QualityTier / QualityConfig / IQualityManager）见
     // Runtime/Core/PresentationContracts.cs（Game 门面在 Core）。
 
     /// <summary>
@@ -182,8 +182,8 @@ namespace CloverEngine
         {
             if (!Presets.TryGetValue(level, out var preset)) return;
 
-            // 拷一份再对外暴露：原实现直接引用静态 Presets 里的实例，
-            // 业务改 Config 会污染全局预设（后续切档拿到被改坏的配置）。
+            // 拷一份再对外暴露（直接引用静态 Presets 里的实例会被业务改 Config 污染，
+            // 后续切档拿到被改坏的配置）。
             _config = Clone(preset);
 
             Application.targetFrameRate = preset.TargetFrameRate;

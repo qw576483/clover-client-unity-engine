@@ -77,7 +77,7 @@ namespace CloverEngine
     /// <summary>
     /// 有限状态机的实现，管理状态注册、转换和更新。
     /// <para>
-    /// <b>对外可实例化</b>（经 <see cref="Game.NewFsm"/>；本类由 <c>internal</c> 提升为 <c>public</c>）——
+    /// <b>对外可实例化</b>（经 <see cref="Game.NewFsm"/>；本类在 <c>Core</c> 程序集内、类型为 <c>public</c>）——
     /// <b>为什么业务需要一个自己的实例</b>：引擎里只有一份<b>应用级单例</b>
     /// <see cref="Game.Fsm"/>（<c>Game.Launch</c> 时建立、<c>Game.InitFsm</c> 注册的是
     /// 游戏流程状态 Launching/Logging/MainCity/Battle…，且 <c>Game.Tick</c> 只驱动它一份）。
@@ -86,7 +86,7 @@ namespace CloverEngine
     /// 触发"存活期回调被整体替换"的告警）⇒ 结构上不成立。
     /// 语义只有一份实现：业务直接用 <c>Game.NewFsm()</c> 拿自己那份实例，⛔ 不要自己再抄一份
     /// （自环守卫 / 回调内再转换排队 / 连锁上限 8 / 异常隔离都必须走本类）。
-    /// 本类由 <c>internal</c> 提升为 <c>public</c> 就是为了让跨程序集也能实例化。
+    /// 本类公开，是为了让跨程序集也能实例化。
     /// </para>
     /// <para>
     /// 与 <see cref="Game.Fsm"/> 的关系：<b>完全独立</b> —— 新实例有自己的

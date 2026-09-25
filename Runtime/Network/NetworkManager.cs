@@ -493,7 +493,7 @@ namespace CloverEngine
         /// <param name="udpAddr">裸 UDP 共享端点，格式为 "host:port"，传 null 不启用</param>
         public void Connect(string addr, string udpAddr)
         {
-            // 兼容旧签名：只给了 TCP 地址（+ 可选 UDP）时，用 GameConfig 里的 WS 配置补齐降级链。
+            // 只给了 TCP 地址（+ 可选 UDP）时，用 GameConfig 里的 WS 配置补齐降级链。
             // QUIC 与裸 UDP 共用服务端 listen_udp，所以 QUIC 线路地址就是 udpAddr；
             // 是否真的加进去由 TransportCapabilities 决定（原生平台 + 插件可用 + 本进程未失败过），
             // 被裁掉时会在"已按平台裁剪线路"日志里写明原因 —— 不静默。

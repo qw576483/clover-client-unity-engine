@@ -282,7 +282,7 @@ namespace CloverEngine.Tests
             var port = ReservePort();
 
             var self = LanHostInfo.Create("127.0.0.1", 8002, 8003, "http://127.0.0.1:8051",
-                "引擎应答端", 2, 7, "9.9.9", "sink4");
+                "引擎应答端", 2, 7, "9.9.9", "extra");
 
             var responder = CloverLan.CreateResponder();
             _responder = responder;
@@ -329,7 +329,7 @@ namespace CloverEngine.Tests
             Assert.AreEqual(2, host.Players);
             Assert.AreEqual(7, host.MaxPlayers);
             Assert.AreEqual("9.9.9", host.Version);
-            Assert.AreEqual("sink4", host.Extra);
+            Assert.AreEqual("extra", host.Extra);
 
             Assert.GreaterOrEqual(responder.QueryCount, 1, "应答端应收到查询");
             Assert.AreEqual(responder.QueryCount, responder.ReplyCount, "每条合法查询都必须有应答");

@@ -30,19 +30,19 @@
 // 容错契约（每条都有对应 EditMode 测试）：
 //   · 空帧表（null / 长度 0）⇒ 不抛、不播，**降频 Warn 一条**（调用方据此查"资源没加载成功"）；
 //   · `fps <= 0` / NaN / ±Inf ⇒ 按 1 fps 处理，降频 Warn 一条（不除零、不出 NaN）；
-//     ⚠️ 这条只适用于**旧签名** `Play(Sprite[], float, bool)` / `PlayOnce(Sprite[], float, Action)`
+//     ⚠️ 这条只适用于**不带切片的重载** `Play(Sprite[], float, bool)` / `PlayOnce(Sprite[], float, Action)`
 //     —— 它们的语义被既有调用方与 EditMode 测试钉着（`InvalidFps_FallsBackToOne`），⛔ 不许改。
-//     下面三条新语义只落在**新增重载**上。
+//     下面三条语义只落在**带切片的重载**上。
 //   · 运行中换帧表（重播）⇒ 下标与累计时间**归零**（不会拿旧表的下标去索引新表）；
 //   · `target` 允许为 null（离线宿主 / EditMode 测试只推进状态，不写 SpriteRenderer）；
 //   · `PlayOnce` 的完成回调抛异常 ⇒ 接住并 Error 留痕，**不打断**调用方的 Tick 链；回调只触发一次；
 //   · 单次 `Advance` 推进步数有上限（防"超大 dt / 长时间没 Tick"把一帧卡成死循环）。
 //
-// ★ 三条语义（**只加在重载上，旧签名语义逐字不变**）：
+// ★ 三条语义（**只落在带切片的重载上**）：
 //   ① **`fps == 0` = 静止帧（停播、停在某帧）**，不是"1 fps 慢慢抖"。
 //      （idle 档用 `0f` 帧率 ⇒ 单条静止姿态帧，按 0 播才是对的）。
-//      ⇒ `Play(frames, indices, fps, loop)` / `PlayStill(frames, index)` 按这条；旧 `Play(frames, fps)`
-//      仍是"非法 fps ⇒ 1 fps + 降频 Warn"（那是既有契约，见上）。
+//      ⇒ `Play(frames, indices, fps, loop)` / `PlayStill(frames, index)` 按这条；不带切片的
+//      `Play(frames, fps)` 是"非法 fps ⇒ 1 fps + 降频 Warn"（见上）。
 //   ② **帧段子集 / 多区间**：一档动画的帧往往**不是连续区间**（例：`attack` =
 //      帧 `182-230 ∪ 247-251`），只喂连续 `Sprite[]` 就得每次换档现切一份数组，且容易把别的动作的帧夹进来。
 //      ⇒ 新增 `Play(frames, int[] indices, …)`（下标集合，顺序即播放顺序）+
@@ -123,7 +123,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 当前**档位**的帧数（用了帧切片时 = 切片长度，否则 = 帧表长度）。0 = 没帧可放。
-        /// <para>未用帧切片的调用方看到的值与本次改动前**逐字一致**（= 帧表长度）。</para>
+        /// <para>未用帧切片时 = 帧表长度。</para>
         /// </summary>
         public int ClipLength => _clip != null && _clip.Length > 0
             ? _clip.Length
@@ -135,12 +135,12 @@ namespace CloverEngine
         /// <summary>当前是否循环播放（<see cref="PlayOnce"/> ⇒ false）。</summary>
         public bool Loop { get; private set; }
 
-        /// <summary>当前**档位**帧数（0 = 没帧可放）。未用帧切片时 = 帧表长度（与改动前一致）。</summary>
+        /// <summary>当前**档位**帧数（0 = 没帧可放）。未用帧切片时 = 帧表长度。</summary>
         public int FrameCount => ClipLength;
 
         /// <summary>
         /// 当前档位内的位置下标（0 起；空帧表时恒 0）。
-        /// <para>未用帧切片时它**就是**帧数组下标（与改动前一致）；用了切片时它是"档位位置"，
+        /// <para>未用帧切片时它**就是**帧数组下标；用了切片时它是"档位位置"，
         /// 对应的帧下标是 <c>ClipIndices[FrameIndex]</c>。</para>
         /// </summary>
         public int FrameIndex => _index;
@@ -149,12 +149,12 @@ namespace CloverEngine
         public bool IsPlaying => _playing;
 
         /// <summary>
-        /// 循环播放（**旧签名，语义逐字不变**）。
+        /// 循环播放（**不带切片的重载**：<paramref name="frames"/> 整张按序播）。
         /// <para>空帧表 ⇒ 不播 + 降频 Warn；<paramref name="fps"/> &lt;= 0（或 NaN/Inf）⇒ 按 1 fps + 降频 Warn。</para>
         /// <para>重播 / 换表一律**从第 0 帧重新开始**（累计时间归零），并立刻把第 0 帧推到渲染器
         /// （否则首帧前会空窗一个帧周期）。</para>
-        /// <para>⚠️ "`fps == 0` = 静止帧（停播）"的新语义**不在**这里（旧签名被既有调用方与 EditMode
-        /// 测试钉着）⇒ 要静止帧用 <see cref="Play(Sprite[], int[], float, bool)"/>（<c>fps = 0</c>）
+        /// <para>⚠️ "`fps == 0` = 静止帧（停播）"只对**带切片的重载**成立；本重载被既有调用方与 EditMode
+        /// 测试钉着（见上）⇒ 要静止帧用 <see cref="Play(Sprite[], int[], float, bool)"/>（<c>fps = 0</c>）
         /// 或 <see cref="PlayStill"/>。</para>
         /// </summary>
         public void Play(Sprite[] frames, float fps, bool loop = true) => Begin(frames, null, fps, loop, null, false);
@@ -175,7 +175,7 @@ namespace CloverEngine
         /// 下标集合用 <see cref="ExpandRuns"/>。
         /// </para>
         /// <para>
-        /// <b>本重载的 <c>fps</c> 语义与旧签名不同</b>：<c>fps == 0</c> = **静止帧**（停在切片首帧、不播、
+        /// <b>本重载的 <c>fps</c> 语义与不带切片的重载不同</b>：<c>fps == 0</c> = **静止帧**（停在切片首帧、不播、
         /// 不告警 —— 那是合法取值，例：原版 idle 就是单条静止姿态帧）；而 <c>NaN / ±Inf / 负数</c>
         /// 仍按 1 fps + 降频 Warn（那些才是写错）。
         /// </para>
@@ -403,9 +403,9 @@ namespace CloverEngine
         /// <param name="indices">帧下标切片；<c>null</c> / 空 = 整表。</param>
         /// <param name="stillOnZeroFps">
         /// <c>true</c> ⇒ <c>fps == 0</c> 按「静止帧」处理（停播、停在首帧、**不打日志**）；
-        /// <c>false</c> ⇒ 旧签名语义（<c>fps &lt;= 0</c> 一律按 1 fps + 降频 Warn）。
-        /// <para>两条语义刻意并存：旧签名被既有调用方与 EditMode 测试（`InvalidFps_FallsBackToOne`）钉住，
-        /// ⛔ 不许改；新重载才带"0 = 静止帧"。</para>
+        /// <c>false</c> ⇒ <c>fps &lt;= 0</c> 一律按 1 fps + 降频 Warn（不带切片的重载走这条）。
+        /// <para>两条语义并存：不带切片的重载按 1 fps 兜底（EditMode `InvalidFps_FallsBackToOne` 钉住），
+        /// 带切片的重载把 <c>fps == 0</c> 当静止帧（不播、停在首帧、**不打日志**）。</para>
         /// </param>
         private void Begin(Sprite[] frames, int[] indices, float fps, bool loop, Action onComplete,
             bool stillOnZeroFps)
@@ -438,7 +438,7 @@ namespace CloverEngine
             if (ClipLength == 0)
             {
                 // 非预期分支：空帧表 ⇒ 不抛、不播（保持渲染器现状），但必须留痕（降频，避免每帧刷屏）。
-                // Fps 保持上面算出的值 —— 与本次改动前逐字一致。
+                // Fps 保持上面算出的值（= NormalizeFps 归一化结果，或静止帧时的 0）。
                 _playing = false;
                 LogThrottle.WarnThrottled(Tag, "empty-frames",
                     "Play 收到空帧表（null 或长度 0）⇒ 不播放、不抛异常；" +
@@ -564,7 +564,7 @@ namespace CloverEngine
         }
 
         /// <summary>
-        /// 比较用归一化（**不写日志**）：与"新重载"口径一致 —— <c>0</c> 保留为 <c>0</c>（= 静止帧），
+        /// 比较用归一化（**不写日志**）：与带切片的重载口径一致 —— <c>0</c> 保留为 <c>0</c>（= 静止帧），
         /// 其余非法值按 <see cref="MinFps"/>。
         /// <para>为什么不直接调 <see cref="NormalizeFps"/>：那是"要播放了"的路径，对非法值要留痕；
         /// 而"比一下是不是同一个档"不该产生告警（否则每次换档判定都会打一条无关的日志）。</para>

@@ -304,7 +304,7 @@ namespace CloverEngine
         /// <inheritdoc/>
         public void ShowLoading(string text = null)
         {
-            // 旧签名 = "不确定进度"（不显示进度条）⇒ 行为不变。
+            // 不确定进度（不显示进度条）。
             _loading.Show(text, LoadingLayer.Indeterminate);
         }
 

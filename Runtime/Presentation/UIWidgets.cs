@@ -151,7 +151,7 @@ namespace CloverEngine
             text.verticalOverflow = VerticalWrapMode.Overflow;
             text.supportRichText = false;
 
-            // ★ 2026-09-19 纯新增：通知"文字渲染挂钩"。
+            // 通知"文字渲染挂钩"。
             //   ① 位置必须在**最后**：文案 / 字号 / 对齐 / 颜色 / 溢出策略都已就位，挂钩里才读得到
             //      （挂钩会把这些当数据源，例如按 fontSize 选字模档位）；也才不会被上面的
             //      `text.font = DefaultFont()` 覆盖回去（本例里挂钩通常把 font 清成 null）。
@@ -585,7 +585,7 @@ namespace CloverEngine
 
         /// <summary>
         /// 「不确定进度」的哨兵（<c>NaN</c>）：<see cref="Show"/> 收到它 ⇒ 不显示进度条。
-        /// <para>为什么用 NaN 而不是 -1：<see cref="IUIManager.ShowLoading(string)"/>（旧签名）与
+        /// <para>为什么用 NaN 而不是 -1：<see cref="IUIManager.ShowLoading(string)"/>（不带进度的那个重载）与
         /// 带进度的重载共用同一个 <see cref="Show"/>，而 <c>NaN</c> 是唯一**永远不可能是合法进度**的值
         /// （0~1 的区间里没有它），不会被业务"传个负数当进度"之类的写法误撞。</para>
         /// </summary>

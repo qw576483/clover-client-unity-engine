@@ -29,7 +29,7 @@ namespace CloverEngine
     /// </para>
     ///
     /// <para>
-    /// <b>双向公开</b>：本类是**公开契约**（2026-09-24 由 <c>internal</c> 提升为 <c>public</c>）——
+    /// <b>双向公开</b>：本类是**公开契约**（公开 API）——
     /// 「问」的一侧由引擎自带（<see cref="ILanBrowser"/>），「答」的一侧也已补齐
     /// （<see cref="ILanResponder"/>，经 <see cref="CloverLan.CreateResponder"/> 取得）。
     /// 公开协议是为了让业务**不再逐字复制一份线格式**：复制品一旦漂移，表现是

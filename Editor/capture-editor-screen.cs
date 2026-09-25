@@ -29,7 +29,7 @@
 //   unity command run_script --file <本文件> --project-path <项目根>/client \
 //         --entry CloverEngine.Editor.EditorScreenCapture.Shot
 //   参数走 spec 文件 `<项目根>/.ai-tmp/test/editor-shot-spec.txt`（key=value 逐行，
-//   与 CLI 的引号转义绝缘）。兼容旧名 `bv-shot-spec.txt`（先找新名，找不到再找旧名）。
+//   与 CLI 的引号转义绝缘）；读不到时回退到同目录下的 `bv-shot-spec.txt`。
 //
 //   entry 一览（返回一行自报读数的字符串，⛔ 不靠"看返回值猜成功"）：
 //     Info    : 主窗口矩形 + Game view 矩形 + Gizmos 开关（只读）

@@ -349,6 +349,75 @@ namespace CloverEngine
         /// <summary>已填充的历史槽数（0 .. <c>HistSlots</c>）。</summary>
         public int HistoryLength { get { return _histLen; } }
 
+        /// <summary>
+        /// 最旧那个**已填充**槽在历史数组里的下标（一格都没有时 = <c>HistSlots</c>）。
+        /// <para>有效下标区间 = <c>[HistoryStartIndex, HistSlots - 1]</c>，共 <see cref="HistoryLength"/> 格。
+        /// <see cref="PayloadAt"/> / <see cref="TimestampAt"/> 的入参是**另一个口径**（0 = 最旧），
+        /// 换算关系：<c>PayloadAt(k)</c> 读的就是下标 <c>HistoryStartIndex + k</c>。</para>
+        /// </summary>
+        public int HistoryStartIndex { get { return _options.HistSlots - _histLen; } }
+
+        /// <summary>
+        /// **按历史槽读载荷**（0 = 最旧那一格，<c>HistoryLength - 1</c> = 最新那一格，槽序**最旧 → 最新**）。
+        /// <para>
+        /// <b>为什么需要它</b>：只暴露"正在渲染的那一对"（<see cref="WindowStartPayload"/> /
+        /// <see cref="WindowEndPayload"/>）时，调用方取不到更早的快照。而"拿环里最旧的那格当基线"是常见需求 ——
+        /// 例：朝向基线要落后最新 **5 个间隔（500 ms）**，只落后 1 个间隔时朝向会随抖动反复翻转。
+        /// </para>
+        /// <para><b>缺口的最小复现</b>：<c>var it = new SnapshotInterpolator(); it.Push(0f, a);
+        /// it.Push(100f, b); it.Push(200f, c);</c> ⇒ 三个载荷都在环里（<c>HistoryLength == 3</c>），
+        /// 但公开面没有任何入口能取到下标 0（最旧）那份载荷。</para>
+        /// <para><b>自证</b>：<c>Tests/Editor/SnapshotInterpolatorTests.cs</c> 的
+        /// <c>PayloadAt_ReadsSlotsOldestToNewest</c> / <c>PayloadAt_RollsOver_OldestDropsOut</c> /
+        /// <c>PayloadAt_OutOfRange_ReturnsNullWithoutThrowing</c>。</para>
+        /// <para><b>已知边界</b>：① <paramref name="slotFromOldest"/> 越界（&lt; 0 或 ≥
+        /// <see cref="HistoryLength"/>）⇒ 返回 <c>null</c> + 一条 Warn（只报一次）——
+        /// ⛔ 不抛异常、⛔ 也不夹到最近的一格（静默返回**别的槽**会让调用方拿错基线而毫无察觉）；
+        /// ② 槽里本来就可能是 <c>null</c>（<see cref="Push"/> 允许 payload 为 null）
+        /// ⇒ 要区分"越界"与"这一格真没载荷"，先按 <see cref="HistoryLength"/> 判范围；
+        /// ③ 槽按**到达顺序**排，丢帧 / 乱序丢弃会让相邻槽的实际时间差大于一个标称间隔
+        /// ⇒ 要精确时间差读 <see cref="TimestampAt"/>。</para>
+        /// <para><b>用法 + 首个消费方</b>：
+        /// <c>for (var k = 0; k &lt; it.HistoryLength; k++) { var p = it.PayloadAt(k); ... }</c>
+        /// —— 目前**还没有调用方**：业务侧战斗表现仍是自持渲染时钟与六槽快照历史，尚未切到本件。</para>
+        /// </summary>
+        /// <param name="slotFromOldest">槽号，<c>0</c> = 最旧，<c>HistoryLength - 1</c> = 最新。</param>
+        /// <returns>该槽的载荷引用；越界 ⇒ <c>null</c>（已留痕）。</returns>
+        public object PayloadAt(int slotFromOldest)
+        {
+            var idx = SlotIndexOrWarn(slotFromOldest, "PayloadAt");
+            return idx < 0 ? null : _payloadHist[idx];
+        }
+
+        /// <summary>
+        /// **按历史槽读服务端时间戳**（毫秒；槽序同 <see cref="PayloadAt"/>），用来把"落后几个间隔"算成真实毫秒。
+        /// <para><b>已知边界</b>：越界（&lt; 0 或 ≥ <see cref="HistoryLength"/>）⇒ 返回 <c>NaN</c> + 一条 Warn
+        /// （只报一次）—— ⛔ 不抛、⛔ 不返回 0（0 是合法时间戳的取值，返回 0 会被读成"最早那一格"）。</para>
+        /// <para><b>自证</b>：<c>Tests/Editor/SnapshotInterpolatorTests.cs</c> 的
+        /// <c>TimestampAt_MatchesPushedStamps</c> / <c>PayloadAt_OutOfRange_ReturnsNullWithoutThrowing</c>。</para>
+        /// </summary>
+        /// <param name="slotFromOldest">槽号，<c>0</c> = 最旧，<c>HistoryLength - 1</c> = 最新。</param>
+        public float TimestampAt(int slotFromOldest)
+        {
+            var idx = SlotIndexOrWarn(slotFromOldest, "TimestampAt");
+            return idx < 0 ? float.NaN : _msHist[idx];
+        }
+
+        /// <summary>
+        /// 把「0 = 最旧」的槽号换成历史数组下标；越界 ⇒ <c>-1</c> 并留一条 Warn（只报一次）。
+        /// </summary>
+        private int SlotIndexOrWarn(int slotFromOldest, string member)
+        {
+            if (slotFromOldest >= 0 && slotFromOldest < _histLen)
+                return _options.HistSlots - _histLen + slotFromOldest;
+
+            LogThrottle.WarnOnce(Tag, _logKey + "/history.slotRange",
+                member + "(" + slotFromOldest + ") 越界：历史现有 " + _histLen + " 格（合法槽号 0.." +
+                (_histLen - 1) + "，0 = 最旧）⇒ 返回空值；调用方应先按 HistoryLength 判范围" +
+                "（⛔ 不抛异常、⛔ 不夹到别的槽；只报一次）");
+            return -1;
+        }
+
         /// <summary>是否已经有一对可插值的窗口（<c>history &gt;= 2</c> 且已对齐过时钟）。</summary>
         public bool HasWindow { get { return _hasPrev && !float.IsNaN(_renderMs); } }
 
@@ -377,10 +446,21 @@ namespace CloverEngine
         /// <summary>**正在渲染的那一对**的结束时间戳（毫秒；两者之差应 ≡ 服务端间隔）。</summary>
         public float WindowEndMs { get { return _currMs; } }
 
-        /// <summary>正在渲染的那一对的起始载荷（由调用方在 <see cref="Push"/> 时给的引用）。</summary>
+        /// <summary>
+        /// 正在渲染的那一对的起始载荷（由调用方在 <see cref="Push"/> 时给的引用）。
+        /// <para><b>未就绪时为 <c>null</c></b>：还没收到第一帧快照前（<see cref="HasWindow"/> == <c>false</c>），
+        /// 这里与 <see cref="WindowEndPayload"/>、<see cref="PayloadAt"/> 一律给 <c>null</c>。
+        /// 载荷类型由调用方自定（本件只存引用、不建容器），引擎给不出合法的"空载荷"
+        /// ⇒ 机械转发（直接 <c>foreach</c> / 直接转类型）会 NRE，调用点必须先判 <see cref="HasWindow"/>（或判空）。</para>
+        /// <para><b>为什么不给只读空集合兜底</b>：载荷是个 `object`，它"空"是什么形状（有几张表、哪些字段）
+        /// 只有调用方知道；造一个假空对象等于把「没有数据」伪装成「有一份空数据」，调用方再也分不出
+        /// 「离散事件早于首帧快照」和「这一帧真的没有任何实体」。</para>
+        /// <para><b>自证</b>：<c>Tests/Editor/SnapshotInterpolatorTests.cs</c> 的
+        /// <c>WindowPayloads_NullBeforeFirstPush</c>。</para>
+        /// </summary>
         public object WindowStartPayload { get { return _prevPayload; } }
 
-        /// <summary>正在渲染的那一对的结束载荷。</summary>
+        /// <summary>正在渲染的那一对的结束载荷；**未就绪时为 <c>null</c>**（口径见 <see cref="WindowStartPayload"/>）。</summary>
         public object WindowEndPayload { get { return _curPayload; } }
 
         /// <summary>最新收到的快照的时间戳（毫秒）。</summary>
@@ -394,6 +474,15 @@ namespace CloverEngine
 
         /// <summary>渲染时钟当前是否**掉出了**快照历史（= 插值已被夹成阶梯，属静默失效，已留痕）。</summary>
         public bool OutOfWindow { get { return _outOfWindow; } }
+
+        /// <summary>
+        /// 渲染时钟当前是否被**超前上限**夹住（快照停推期间时钟不许发明时间）。
+        /// <para>用途：那一路的"停推"留痕是「只报一次」的，调用方要**自己按局记账**就靠这个只读位
+        /// （快照一恢复、时钟回到正常范围即自动复位 <c>false</c>）。</para>
+        /// <para><b>自证</b>：<c>Tests/Editor/SnapshotInterpolatorTests.cs</c> 的
+        /// <c>ClockLeadCapped_TracksStallAndRecovery</c>。</para>
+        /// </summary>
+        public bool ClockLeadCapped { get { return _clockLeadCapped; } }
 
         /// <summary>被丢弃的帧数（时间戳没前进 / 乱序 ⇒ 整帧丢弃、不入历史）。</summary>
         public int DroppedOutOfOrderCount { get { return _droppedOutOfOrder; } }
@@ -693,11 +782,28 @@ namespace CloverEngine
 
         /// <summary>
         /// 复位到"还没收到任何快照"的状态（**换对局 / 重连 / 出图**时调）。
-        /// <para>时钟对齐点、历史、窗口、自检计数全清；「只报一次」的告警**不重置**
-        /// （它们按实例记账，跨对局保留 —— 否则每局都会把那几条刷一遍）。</para>
+        /// <para>时钟对齐点、历史、窗口、自检计数全清。</para>
+        /// <para><b>为什么需要一个"同时重置告警记账"的参数</b>：本件的「只报一次」告警记账落在
+        /// <c>LogThrottle</c> 的**进程级**表里（键 = 本实例的日志键 + 告警名），**不随实例状态走**
+        /// ⇒ <see cref="Reset()"/> 之后第 2 局起，"无时间戳 / 乱序丢弃 / 时钟超前上限 / 历史槽越界"
+        /// 这几类非预期分支**不再留痕**。</para>
+        /// <para><b>最小复现</b>：<c>var it = new SnapshotInterpolator(); it.Push(-1f, null);</c>（报一次
+        /// 「快照 server_ms 缺失」）<c>it.Reset(); it.Push(-1f, null);</c> ⇒ 第二次**没有任何输出**。</para>
+        /// <para><b>自证</b>：<c>Tests/Editor/SnapshotInterpolatorTests.cs</c> 的
+        /// <c>Reset_KeepsWarnOnceByDefault</c>（对照组：不带参数时语义不变）与
+        /// <c>Reset_WithResetWarnOnce_EmitsAgain</c>。</para>
+        /// <para><b>已知边界</b>：① 只清**本实例日志键前缀下**的记录（<c>LogThrottle.Forget</c>），
+        /// 别的实例、别的件的记账不受影响；② 参数默认 <c>false</c> ⇒ 既有调用方拿到的行为**一字不变**；
+        /// ③ 告警记账是**进程级**的，若同一个实例被两个并行的对局共用，重置会同时影响两边（本件非线程安全、
+        /// 一实例一对局，属预期的用法约束）。</para>
+        /// <para><b>用法 + 首个消费方</b>：<c>it.Reset(resetWarnOnce: true)</c> —— 想让"下一局仍有告警留痕"
+        /// 就传 <c>true</c>；想"整个进程只留一次痕"保持默认。目前**还没有调用方**。</para>
         /// </summary>
-        public void Reset()
+        /// <param name="resetWarnOnce">是否连「只报一次」的记账一起清（默认 <c>false</c> = 保持现行为）。</param>
+        public void Reset(bool resetWarnOnce = false)
         {
+            if (resetWarnOnce) LogThrottle.Forget(_logKey + "/");
+
             var now = _clock();
 
             for (var i = 0; i < _msHist.Length; i++)

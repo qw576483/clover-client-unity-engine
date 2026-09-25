@@ -33,6 +33,8 @@
 //   ⑥ 计数口径的边界：`everyN <= 1` 视为 1（= 每次都打，⛔ 不除零、不死循环）；
 //      空 / `null` key 归并为 `"default"`（**刻意**不同于 `ShouldLog` 的"空 key 恒 false + 只报一次"，
 //      ⛔ 不许改 `ShouldLog`）；`Suppress == true` ⇒ 三个 `*Counted` 一律 false。
+//   ⑦ 清空范围分两级：`Reset()` = 全进程；`Forget(prefix)` = 某个 key 前缀（时间口径与计数口径**一起**清，
+//      给"按实例 / 按模块重新计"用）。`Forget` 的空 / `null` 前缀 ⇒ **不动作**（⛔ 不当成"清全部"）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System;
@@ -258,6 +260,56 @@ namespace CloverEngine
         {
             LastEmitAt.Clear();
             Counters.Clear();
+        }
+
+        /// <summary>
+        /// 清掉**某个 key 前缀**下的限频记录：时间口径（<see cref="LastEmitAt"/>）与计数口径
+        /// （<see cref="Counters"/>）**一起**清 —— 语义 = "只对该前缀做一次 <see cref="Reset"/>"，
+        /// 于是该前缀下的每个 key 重新「首次必打」。
+        /// <para>给"按实例 / 按模块重新计"的调用方用：把实例自己的日志键前缀传进来，
+        /// **别处（别的实例 / 别的模块）的记账不受影响** —— 这正是它区别于 <see cref="Reset"/> 的地方
+        /// （后者清全进程）。</para>
+        /// <para><b>边界</b>：① 前缀按 <see cref="System.StringComparer.Ordinal"/> 的
+        /// <c>StartsWith</c> 匹配 ⇒ 调用方要把前缀收在分隔符上（例 <c>"Foo[12]/"</c>），
+        /// 否则 <c>"Foo[12]"</c> 会连带命中 <c>"Foo[123]/…"</c>；② 空前 / <c>null</c> 前缀 ⇒
+        /// **不做任何事**（要清全部请用 <see cref="Reset"/>）并只报一次 Warn（⛔ 不静默）；
+        /// ③ 与 <see cref="Reset"/> 一样是非线程安全的，主线程使用。</para>
+        /// </summary>
+        public static void Forget(string keyPrefix)
+        {
+            if (string.IsNullOrEmpty(keyPrefix))
+            {
+                if (!_emptyForgetPrefixWarned)
+                {
+                    _emptyForgetPrefixWarned = true;
+                    Game.Logger?.Warn(InternalTag,
+                        "LogThrottle.Forget 收到空前缀 ⇒ 已按「不动作」处理（要清空全部请用 Reset()）");
+                }
+                return;
+            }
+
+            RemoveByPrefix(LastEmitAt, keyPrefix);
+            RemoveByPrefix(Counters, keyPrefix);
+        }
+
+        /// <summary>空前缀告警是否已出过（只报一次，避免自刷屏）。</summary>
+        private static bool _emptyForgetPrefixWarned;
+
+        /// <summary>删掉 <paramref name="table"/> 里所有以 <paramref name="prefix"/> 开头的 key（先收集后删，不边遍历边改）。</summary>
+        private static void RemoveByPrefix<TValue>(Dictionary<string, TValue> table, string prefix)
+        {
+            List<string> matched = null;
+            foreach (var key in table.Keys)
+            {
+                if (key != null && key.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    if (matched == null) matched = new List<string>();
+                    matched.Add(key);
+                }
+            }
+
+            if (matched == null) return;
+            for (var i = 0; i < matched.Count; i++) table.Remove(matched[i]);
         }
 
         // ── 内部 ─────────────────────────────────────────────────────────────

@@ -436,7 +436,9 @@ CloverEngine.Presentation  → [Core]
 | 每帧 | `Tick()` → 推进渲染时钟（**绝对真实时间 × 速率**，⛔ 不写"每帧累加 `Time.deltaTime`"—— 被 `Time.maximumDeltaTime` 夹住会永久落后）→ 有界比例速率修正（`SteerRate`）→ **按时钟**从历史选"夹住时钟的那一对" → 返回插值比例 `t` |
 | 三代失败模式 | ①**分母写死 + 每帧重置** ⇒ 每收一帧前跳一次；②**到达驱动换窗口** ⇒ 速度 cv 0.24~0.28（10 Hz"哆嗦"）；③**本代**：按时钟选窗口 + 有界比例速率修正 ⇒ 离线仿真速度 cv 0.000、峰值比 1.000。三条都逐字写在文件头 |
 | 参数化（⛔ 不写死帧率） | `SnapshotInterpolatorOptions`：`SnapshotIntervalMs`（10 Hz⇒100）· `ExpectedRenderFps` · `HistSlots`（6）· `RenderLagIntervals`（2）· `LagSteerGain` / `LagSteerMaxRate`（0.05）· `CatchUpMaxRate`（1）· `CatchUpThresholdIntervals`（3）· `ServerNowExtrapCapIntervals`（2）· `ClockMaxLeadIntervals`（1）+ 派生量与 `HistoryCoverageMs`；非法 / 过小值**归一化 + 一条 Warn**，历史覆盖不足缓冲余量、快照比渲染帧还密各有**诊断留痕** |
-| 自检面 | `RenderClockMs` · `InterpRatio` · `RenderLagMs` · `BufferLagMs` · `WindowStartMs` / `WindowEndMs` / `WindowStartPayload` / `WindowEndPayload` · `NewestSnapshotMs` · `ClockRate` · `CatchingUp` · `HasWindow` · `HistoryLength` · `SnapshotCount` · `OutOfWindow` · `DroppedOutOfOrderCount` · `Reset()` |
+| 自检面 | `RenderClockMs` · `InterpRatio` · `RenderLagMs` · `BufferLagMs` · `WindowStartMs` / `WindowEndMs` / `WindowStartPayload` / `WindowEndPayload` · `NewestSnapshotMs` · `ClockRate` · `CatchingUp` · `HasWindow` · `HistoryLength` · `SnapshotCount` · `OutOfWindow` · `ClockLeadCapped` · `DroppedOutOfOrderCount` · `Reset(bool resetWarnOnce = false)` |
+| 按历史槽读 | `HistoryStartIndex`（最旧那个已填充槽在历史数组里的下标；一格都没有 = `HistSlots`）· `PayloadAt(int slotFromOldest)`（**0 = 最旧**、`HistoryLength-1` = 最新）· `TimestampAt(int slotFromOldest)`（毫秒）⇒ 取"任意一格"的载荷 / 时间戳（不只"正在渲染那一对"），用于拿"环里最旧的那格"当基线（例：朝向基线要落后最新 5 个间隔 = 500 ms）。越界 ⇒ `null` / `NaN` + **只报一次** Warn（⛔ 不抛、⛔ 不夹到别的槽）；未就绪时 `WindowStartPayload` / `WindowEndPayload` / `PayloadAt` 一律 `null` |
+| 记账重置 | `Reset(true)` ⇒ 连本实例的「只报一次」记账一起清（`LogThrottle.Forget`，只清本实例日志键前缀，别的实例不受影响）—— 不带参数时**语义不变**（记账跨局保留，第 2 局起同类分支不再留痕） |
 | 时钟注入 | 构造器 `Func<float> clockSeconds`（返回**秒**，语义同 `Time.realtimeSinceStartup`）；**每帧只采样一次**（`…At(real)` 形式，可复现）；真暂停项目自行注入"暂停即冻结"的时钟（`Runtime/Presentation/SnapshotInterpolator.cs`） |
 
 #### Sound（音效）

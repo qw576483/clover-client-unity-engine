@@ -59,6 +59,7 @@ com.clover.unity-engine/
 │   │                 / Sound / Input / Camera / Quality / BitmapFont（位图字模排版内核：格位 / 度量 / 换行 / UV / bestFit / 回退）
 │   │                 / SpriteSwapButton（sprite-swap 按钮工厂：常态/悬停/按下/禁用四态贴图 + 一张横排条带切 N 态）
 │   │                 / SpriteStripLoader（多帧条带 → 定长帧表：整条 LoadAll 主路 + 逐帧按名兜底 + 就绪回调）
+│   │                 / WorldLightMask（世界光照压暗遮罩：一张径向渐变贴图 + SpriteRenderer，随圆心平移、按分级剖面压暗）
 │   └── Plugins/      原生插件落点（已入库 x86_64/msquic.dll 与 Android arm64-v8a / armeabi-v7a / x86_64 的 libmsquic.so；iOS 待补，QUIC 等原生件落这里）
 ├── Editor/           Editor 横切：Debugger（面板 / GM 控制台 / 网络模拟）
 │                               MapBake（地图烘焙：Unity 关卡 → CloverMap 二进制）
@@ -693,6 +694,7 @@ LogThrottle / LogBuffer  // 静态类，直接 CloverEngine.LogThrottle.X / Clov
 | `TilemapGenUtil`（程序化瓦片） | `Runtime/Presentation/TilemapGenUtil.cs` | `Dir4` / `Dir4Mask` / `EdgeRequirement` + 拼块与生成树入口 | 块级随机 DFS 生成树 + 环路；按四边开口/镜像拼 tileset + Stamp 叠加 | 块库 / 组码 / 原版规则表**全部由调用方注入** |
 | `LoadingPacing`（读条分档节奏） | `Runtime/Presentation/LoadingPacing.cs` | `SceneProgressCeiling`(0.9) / `DefaultProgressShare`(0.5) + 进度↔档位与放行判据 | 把"场景加载进度 + 档位"编排成稳定读条节奏 | ⛔ 帧数 / 档位取值属业务（引擎只给机制） |
 | `CameraBoundsKit`（格空间相机夹制） | `Runtime/Presentation/CameraBoundsKit.cs` | `ClampCameraGrid(...)` / `ClampFocusGrid(...)` / `ClampSpan(...)` | 可见格矩形 ⊆ 地图 + 焦点安全边距（**格空间**口径） | ⛔ 与 `Camera.cs` 的世界 AABB 钳位口径不同；依赖等距参数（`IsoLayout`） |
+| `WorldLightMask`（世界光照压暗遮罩） | `Runtime/Presentation/WorldLightMask.cs` | `new WorldLightMask(Transform parent, int sortingOrder, float spanUnits = 64f, int textureSize = 512, string nodeName = "WorldLightMask")` · `Follow(Vector3)` · `SetRadius(float)` · `SetShadow(Color)` · `SetProfile(float[] alphaByNormDist)` · `SetVisible(bool)` · `Dispose()` · 纯函数 `AlphaAt(float[] profile, float normalizedDistance)` | 以**世界坐标**为圆心、按调用方给的分级 alpha 剖面渲染的压暗遮罩（一个节点 + 一张运行时生成的径向渐变贴图；半径内按剖面渐显、半径外压满） | ⛔ 半径 / 压暗色 / 剖面 / 层级排序值 / 覆盖边长**全由调用方给**（引擎不含任何题材取值）；同进程每个实例各持 1 张贴图，`SetRadius` / `SetProfile` 的**值变了**才重铺（同值幂等，构造期不铺）；世界坐标里的圆 = 屏幕上的圆（等距形变须已烘进美术） |
 | `SceneScaffold`（Editor 横切） | `Editor/SceneScaffold.cs` | `Create(scenePath, SceneScaffoldOptions, out error)` / `ApplyBuildSettings(IList<string>)` / `SetPlayModeStartScene(string)` / `FindTypeByName` / `FindTypeBySimpleName` / `ExecuteFromCommandLine()`（`-executeMethod`）/ 菜单 `Clover/场景脚手架/…` | 生成最小可运行场景 + 写 Build Settings + 设 Play 起始场景 + 反射类型解析 + 启动自愈 | ⛔ 不含任何业务取值；URP `Light2D` 走**反射可选接入**（Editor 程序集不硬引用 URP） |
 
 ### 项目侧调用点
@@ -701,6 +703,7 @@ LogThrottle / LogBuffer  // 静态类，直接 CloverEngine.LogThrottle.X / Clov
 |---|---|---|
 | `ChunkedTilePlanner` | 调用点：有 | 块枚举经 `AppendChunkCoords(xOuter:true)`（顺序固定 ⇒ 画面逐像素不变）；`FrameAccepts` 留在项目侧（它还需"格数"维度，引擎件只建模节点维度） |
 | `TileRenderer` | 调用点：有 | `LocalScaleFor` / `ColorFor` / `HeightPxOf` / `PlaceOfPx` 转调本件；度量口径同源（PPU 64 / 格图 80 / 半格高） |
+| `WorldLightMask` | 调用点：有 | 项目 `Module/View/PlayerLightMask.cs` 为薄转发：半径（`AreaLighting.RadiusUnits`）/ 分级剖面（`AreaLighting.ShadowAlphaAt` 的采样）/ 压暗色（区域环境光）/ 覆盖边长 / 层级排序值仍在该侧算，**渲染全交本件**；位置口径仍走项目自己的 `ViewModule.EntityWorld` 后再 `Follow` |
 | `SceneScaffold` | 调用点：有 | 场景生成 / BuildSettings / Play 起始场景三处均转调本件；项目取值经 `SceneScaffoldOptions` 传入 |
 | 切图规则（`PixelArtSlicingRule` + `IPixelArtSlicer`） | 调用点：有 | 引擎出规则与矩形、**工程出适配器**（U2D provider 属包程序集，引擎不引）；未注册切图器时**明确告警** |
 | `TilemapGenUtil` | 调用点：无 | 块级 DFS 与开口拼块在项目侧地图生成器；项目侧生成结果 = 画面与地图基线判据 |

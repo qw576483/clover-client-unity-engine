@@ -62,6 +62,14 @@ namespace CloverEngine
             public int Releases;
 
             public float LastReportedProgress = -1f;
+
+            /// <summary>已等待的秒数（由 <see cref="ResourceManager.Tick"/> 累加）：超时回收（见
+            /// <see cref="LoadTimeoutSeconds"/>）的判定依据。</summary>
+            public float Waited;
+
+            /// <summary>是否已终结（成功 / 失败 / 超时回收任一）。后端回调晚于超时回收到达时据此丢弃，
+            /// 防止对同一批等待者二次分发（二次入缓存 + 重复回调）。</summary>
+            public bool Completed;
         }
 
         // 缓存键是**业务加载路径**（逻辑键，不落磁盘），大小写不敏感：
@@ -84,6 +92,21 @@ namespace CloverEngine
         private long _cachedBytes;
         private long _watermark;
         private bool _watermarkWarned;
+
+        /// <summary>
+        /// ⛔ 在途加载的**超时回收阈值**（秒，默认 15；可用静态字段调整）：
+        /// 一个 <c>PendingLoad</c> 等待超过该时长仍未收到后端回调 ⇒ 在 <see cref="Tick"/> 里判定失败并回收，
+        /// 把 <c>null</c> 按普通失败分发给全部等待者（等待者因此**可重新发起加载重试**），
+        /// 回收时打一条 Warn（含路径与等待秒数）。
+        /// </summary>
+        /// <para>
+        /// <b>边界</b>：只对 <see cref="Tick"/> 驱动的加载生效（Tick 不跑就不会回收）；
+        /// 超时回收**不取消后端操作本体**，晚到的后端回调按 <c>PendingLoad.Completed</c> 丢弃；
+        /// 等待时长从请求登记起算（含排队），大资源 / 慢盘环境请调大阈值。
+        /// </para>
+        /// <para><b>用法</b>：默认无需配置；需要调整时 <c>ResourceManager.LoadTimeoutSeconds = 30f;</c>。</para>
+        /// </summary>
+        public static float LoadTimeoutSeconds = 15f;
 
         /// <summary>按配置构造资源管理器（含后端选择与热更编排）。</summary>
         /// <param name="config">模块配置；为 null 时按默认（纯 Resources）处理。</param>
@@ -303,6 +326,10 @@ namespace CloverEngine
         /// </summary>
         private void CompletePending(PendingLoad pending, UnityEngine.Object asset)
         {
+            // 终结守卫：超时回收（见 LoadTimeoutSeconds）之后晚到的后端回调到此为止，不二次入缓存、不重复回调
+            if (pending.Completed) return;
+            pending.Completed = true;
+
             _inflight.Remove(pending.Path);
             _activeLoads.Remove(pending);
 
@@ -575,6 +602,19 @@ namespace CloverEngine
                         Game.Logger?.Warn("Resource", $"进度回调异常（{pending.Path}）：{e.Message}");
                     }
                 }
+            }
+
+            // 1b) 在途加载超时回收：后端回调永不返回的加载在此自愈（阈值与口径见 LoadTimeoutSeconds 注释）。
+            //     倒序遍历：CompletePending 会把条目移出 _activeLoads，且回调里可能再发起加载（只会在尾部追加）。
+            for (var i = _activeLoads.Count - 1; i >= 0; i--)
+            {
+                var pending = _activeLoads[i];
+                pending.Waited += dt;
+                if (pending.Waited < LoadTimeoutSeconds) continue;
+
+                Game.Logger?.Warn("Resource",
+                    $"加载超时回收：{pending.Path} 已等待 {pending.Waited:F1}s 仍未回调 ⇒ 按失败释放等待者（可重新发起加载重试）");
+                CompletePending(pending, null);
             }
 
             // 2) 热更下载泵

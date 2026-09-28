@@ -62,6 +62,33 @@ namespace CloverEngine
         private const string Tag = "UiImage";
 
         /// <summary>
+        /// 同路径去重的**在途等待上限**（秒，默认 10；可用静态字段调整）：
+        /// 同路径请求处于在途态超过该时长仍未收到回调 ⇒ 视为失败，<see cref="SetSprite"/>
+        /// 对该路径**放行重试**（打一条限频 Warn 点名路径）。
+        /// </summary>
+        /// <para>
+        /// <b>边界</b>：放行重试**不取消**底层在途加载（由资源管理器的完成 / 超时回收统一收口，
+        /// 阈值应小于其超时回收阈值）；重试要调用方**再次发起** <c>SetSprite</c>，本件不自动重发。
+        /// </para>
+        /// <para><b>用法</b>：默认无需配置；<c>UiImageLoader.PendingRetrySeconds = 20f;</c> 可调。</para>
+        /// </summary>
+        public static float PendingRetrySeconds = 10f;
+
+        /// <summary>
+        /// ⛔ 着色**双通道覆写**告警开关（默认开；置 <c>false</c> 关闭）：
+        /// 贴图到位回调套用记录色调（<see cref="SetTint"/> 通道）时，若发现当前 <c>Image.color</c>
+        /// 与记录值不同（说明有代码**直接写过** <c>img.color</c>，该颜色即将被覆写）⇒ 打一条限频 Warn 点名路径。
+        /// </summary>
+        /// <para>
+        /// <b>边界</b>：调用方在 <c>SetSprite</c> **之前**设置的占位底色若与色调不同，同样会触发本告警
+        /// （占位与色调本就是两条通道，覆写是设计内行为）；只检测"套用那一刻"，套用之后再直接写 color 不检测。
+        /// </para>
+        /// <para><b>用法</b>：默认开；要关时 <c>UiImageLoader.WarnOnTintOverride = false;</c>。
+        /// 直接改色的代码应改走 <see cref="SetTint"/>（色调通道）。</para>
+        /// </summary>
+        public static bool WarnOnTintOverride = true;
+
+        /// <summary>
         /// 一个 Image 的贴图请求状态（键 = Image，存 <see cref="ConditionalWeakTable{TKey,TValue}"/>）。
         /// </summary>
         private sealed class ArtState
@@ -77,6 +104,10 @@ namespace CloverEngine
 
             /// <summary>最近一次请求的路径是否**仍在途**（在途 ⇒ 同路径重复调用直接返回）。</summary>
             public bool Pending;
+
+            /// <summary>进入在途态的时刻（<c>Time.time</c>）：Pending 超时放行重试（见
+            /// <see cref="PendingRetrySeconds"/>）的判定依据。</summary>
+            public float PendingSince;
 
             /// <summary>最近一次请求的路径的贴图是否**已成功落地**（成功 ⇒ 同路径重复调用直接返回）。</summary>
             public bool Applied;
@@ -119,8 +150,15 @@ namespace CloverEngine
             var state = StateOf(img);
             if (tint.HasValue) state.Tint = tint.Value;
 
-            // 同路径去重（在途 / 已成功）；失败过的路径不拦 ⇒ 再调一次就是重试。
-            if (state.Path == path && (state.Pending || state.Applied)) return;
+            // 同路径去重；失败过的路径不拦 ⇒ 再调一次就是重试。
+            // 已成功 ⇒ 直接返回；在途 ⇒ 拦截，但超过 PendingRetrySeconds 仍未回调的视为失败，放行重试。
+            if (state.Path == path && state.Applied) return;
+            if (state.Path == path && state.Pending)
+            {
+                if (Time.time - state.PendingSince < PendingRetrySeconds) return;
+                LogThrottle.WarnThrottled(Tag, "pending.stuck:" + path,
+                    $"同路径请求已 Pending {Time.time - state.PendingSince:F1}s 未回调 ⇒ 放行重试：{path}（Image {img.name}）", 5f);
+            }
 
             if (Game.Res == null)
             {
@@ -133,6 +171,7 @@ namespace CloverEngine
 
             state.Path = path;
             state.Pending = true;
+            state.PendingSince = Time.time;
             state.Applied = false;
             var request = ++state.Request;   // ★ 请求守卫：本次请求的序号（回调里比对）
 
@@ -152,6 +191,13 @@ namespace CloverEngine
 
                 state.Applied = true;
                 img.sprite = sp;
+                // 双通道覆写检测（口径见 WarnOnTintOverride）：只告警，套用行为不变
+                if (WarnOnTintOverride && img.color != state.Tint)
+                {
+                    LogThrottle.WarnThrottled(Tag, "tint.override:" + path,
+                        $"贴图到位套用色调：Image.color 当前为 {img.color}，与记录色调 {state.Tint} 不同" +
+                        $"（有代码直接写过 img.color，该颜色将被覆写）⇒ {path}（Image {img.name}）；直接改色请走 SetTint", 30f);
+                }
                 img.color = state.Tint;   // 色调在"到位那一刻"套用 ⇒ 先设色后回图 / 先回图后设色 两种顺序都对
                 EnsureUnlit(img);         // 防御 2D 光照把 UI 图压暗（见 EnsureUnlit）
             });

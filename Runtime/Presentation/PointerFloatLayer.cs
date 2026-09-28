@@ -112,6 +112,37 @@ namespace CloverEngine
             return new Vector2(x, y);
         }
 
+        /// <summary>
+        /// 锚点定位（控件矩形口径）：浮层（pivot = 左上角）左上角摆在 <paramref name="anchorLocal"/>，再夹进画布。
+        /// <para>
+        /// 与 <see cref="Resolve(Vector2, Vector2, Rect)"/> 的差别：**不叠加指针偏移、不做贴边镜像翻转**
+        /// （锚点是调用方明确定义的点，不是"指针附近的缝隙"），只保留同样的兜底夹取。
+        /// 「控件矩形顶边中点」（参考口径 <c>pos = new Vector2(rect.center.x, rect.yMax)</c>）这一类定位，
+        /// 由调用方把该点换算成画布局部坐标后交给本件（<see cref="PointerFloatLayer.ShowAnchored"/> 已内置换算）。
+        /// </para>
+        /// </summary>
+        /// <param name="anchorLocal">锚点（画布局部坐标，与 <see cref="Resolve"/> 的入参同一空间）。</param>
+        /// <param name="size">浮层尺寸（宽 / 高，画布单位；负值 / 非有限值按 0）。</param>
+        /// <param name="canvasRect">画布矩形（`RectTransform.rect`）。</param>
+        /// <param name="edgeMargin">离画布边留白（负值 / 非有限值按 0）。</param>
+        public static Vector2 ResolveAnchored(Vector2 anchorLocal, Vector2 size, Rect canvasRect, float edgeMargin)
+        {
+            var w = Sanitize(size.x);
+            var h = Sanitize(size.y);
+            var margin = Sanitize(edgeMargin);
+
+            // 夹取口径与 Resolve 第 ③ 步一致（pivot 左上 ⇒ 层向右下展开；区间退化成单点时钉在边/角，不 NaN）
+            var minX = canvasRect.xMin + margin;
+            var maxX = Mathf.Max(minX, canvasRect.xMax - margin - w);
+            var x = Mathf.Clamp(anchorLocal.x, minX, maxX);
+
+            var maxY = canvasRect.yMax - margin;
+            var minY = Mathf.Min(maxY, canvasRect.yMin + margin + h);
+            var y = Mathf.Clamp(anchorLocal.y, minY, maxY);
+
+            return new Vector2(x, y);
+        }
+
         /// <summary>尺寸 / 留白的兜底：负值与非有限值一律按 0（否则会把节点摆到 NaN）。</summary>
         private static float Sanitize(float v)
             => float.IsNaN(v) || float.IsInfinity(v) || v < 0f ? 0f : v;
@@ -152,6 +183,10 @@ namespace CloverEngine
         private Vector2 _size;
         private bool _visible;
         private bool _warnedNoInput;
+        private RectTransform _anchorTarget;
+        private Vector2 _anchorOffset;
+        private bool _anchored;
+        private readonly Vector3[] _anchorCorners = new Vector3[4];
 
         private PointerFloatLayer(RectTransform content)
         {
@@ -208,6 +243,8 @@ namespace CloverEngine
                 pooled.Bind(canvas != null ? canvas : ResolveCanvas(parent));
                 pooled._visible = false;
                 pooled._size = Vector2.zero;
+                pooled._anchorTarget = null;
+                pooled._anchorOffset = Vector2.zero;
                 pooled._content.sizeDelta = Vector2.zero;
                 pooled._content.gameObject.SetActive(false);
                 return pooled;
@@ -241,11 +278,41 @@ namespace CloverEngine
             if (_content != null) _content.sizeDelta = _size;
         }
 
-        /// <summary>显示，并**立刻**摆到指针处（避免第一帧从旧位置飞过来 —— 项目侧原行为）。</summary>
+        /// <summary>显示，并**立刻**摆到指针处（避免第一帧从旧位置飞过来 —— 项目侧原行为）。同时退出锚点态。</summary>
         public void Show()
         {
             if (_content == null) return;
 
+            _anchored = false;
+            _anchorTarget = null;
+            _content.gameObject.SetActive(true);
+            _visible = true;
+            Tick();
+        }
+
+        /// <summary>
+        /// 以**锚到控件矩形**的口径显示浮层（与 <see cref="Show"/> 的跟随指针互斥，后调者生效）。
+        /// <para>
+        /// 锚点 = <paramref name="target"/> 矩形**顶边中点**（世界角点换算为画布局部点）+ <paramref name="offset"/>（画布单位）
+        /// —— 「控件矩形顶边中点」（参考口径 <c>pos = new Vector2(rect.center.x, rect.yMax)</c>）这一类定位都由
+        /// 「顶边中点 + 偏移」表达；此后每帧 <see cref="Tick"/> 重算（目标布局变动跟着走）。
+        /// </para>
+        /// <para>
+        /// <b>边界</b>：<paramref name="target"/> 须与浮层在**同一画布层级**下（换算用
+        /// <c>canvas.InverseTransformPoint</c>），跨画布 / 世界空间元素未支持；不叠加指针偏移、不做贴边镜像翻转
+        /// （只夹进画布，见 <see cref="PointerFloatPlacement.ResolveAnchored"/>）。
+        /// 目标为空 / 已销毁 ⇒ 浮层停在最后位置并降频 Warn（不静默挪框）。
+        /// </para>
+        /// </summary>
+        /// <param name="target">锚定的控件矩形（为空 ⇒ 按未设置处理，浮层停在最后位置）。</param>
+        /// <param name="offset">相对锚点的偏移（画布单位；默认零偏移 = 浮层左上角钉在顶边中点）。</param>
+        public void ShowAnchored(RectTransform target, Vector2 offset = default)
+        {
+            if (_content == null) return;
+
+            _anchored = target != null;
+            _anchorTarget = target;
+            _anchorOffset = offset;
             _content.gameObject.SetActive(true);
             _visible = true;
             Tick();
@@ -274,6 +341,13 @@ namespace CloverEngine
                 return;
             }
 
+            // 锚点态：不读输入，按锚点重摆
+            if (_anchored)
+            {
+                TickAnchored();
+                return;
+            }
+
             var input = Game.Input;
             if (input == null)
             {
@@ -297,6 +371,28 @@ namespace CloverEngine
             }
 
             _content.anchoredPosition = PointerFloatPlacement.Resolve(local, _size, _canvas.rect);
+        }
+
+        /// <summary>锚点态的每帧重摆（口径见 <see cref="ShowAnchored"/>；不读输入，布局变动跟着走）。</summary>
+        private void TickAnchored()
+        {
+            if (_anchorTarget == null)
+            {
+                LogThrottle.WarnThrottled(Tag, "anchor.missing",
+                    "锚点目标未设置或已销毁 ⇒ 浮层停在最后位置（不再按锚点重摆）");
+                return;
+            }
+
+            // 顶边中点 = 左上角与右上角角点的中点（GetWorldCorners 角点序：0 左下 / 1 左上 / 2 右上 / 3 右下）
+            _anchorTarget.GetWorldCorners(_anchorCorners);
+            var topMid = new Vector3(
+                (_anchorCorners[1].x + _anchorCorners[2].x) * 0.5f,
+                (_anchorCorners[1].y + _anchorCorners[2].y) * 0.5f,
+                (_anchorCorners[1].z + _anchorCorners[2].z) * 0.5f);
+
+            var anchorLocal = (Vector2)_canvas.InverseTransformPoint(topMid) + _anchorOffset;
+            _content.anchoredPosition = PointerFloatPlacement.ResolveAnchored(
+                anchorLocal, _size, _canvas.rect, PointerFloatPlacement.DefaultEdgeMargin);
         }
 
         /// <summary>销毁节点（不再复用）。</summary>

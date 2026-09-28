@@ -66,8 +66,20 @@ namespace CloverEngine
         bool IsOpen<T>() where T : class, IUIPanel;
         /// <summary>订阅面板打开事件</summary>
         void OnPanelOpened(Action<string> handler);
+        /// <summary>
+        /// 退订面板打开事件（与 <see cref="OnPanelOpened"/> 配对）。
+        /// <para>未订阅过 / <paramref name="handler"/> 为 null ⇒ <b>空操作</b>（不抛、不报错）。</para>
+        /// </summary>
+        /// <param name="handler">要注销的处理函数（须与订阅时传的是同一个委托实例）。</param>
+        void OffPanelOpened(Action<string> handler);
         /// <summary>订阅面板关闭事件</summary>
         void OnPanelClosed(Action<string> handler);
+        /// <summary>
+        /// 退订面板关闭事件（与 <see cref="OnPanelClosed"/> 配对）。
+        /// <para>未订阅过 / <paramref name="handler"/> 为 null ⇒ <b>空操作</b>（不抛、不报错）。</para>
+        /// </summary>
+        /// <param name="handler">要注销的处理函数（须与订阅时传的是同一个委托实例）。</param>
+        void OffPanelClosed(Action<string> handler);
 
         // ─────────────── 通用件（Toast / 飘字 / Loading / 确认框 / 红点 / 引导） ───────────────
         //

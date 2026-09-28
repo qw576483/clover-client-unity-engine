@@ -282,6 +282,22 @@ namespace CloverEngine
             _closedHandlers.Add(handler);
         }
 
+        /// <inheritdoc/>
+        public void OffPanelOpened(Action<string> handler)
+        {
+            // 空操作语义（与契约一致）：未订阅过 / null 都直接返回，不抛也不报错 ——
+            // 退订比订阅更容易被写成"防御性调用"（销毁路径上通常先退订再判空）。
+            if (handler == null) return;
+            _openedHandlers.Remove(handler);
+        }
+
+        /// <inheritdoc/>
+        public void OffPanelClosed(Action<string> handler)
+        {
+            if (handler == null) return;
+            _closedHandlers.Remove(handler);
+        }
+
         // ─────────────── 通用件（Toast / 飘字 / Loading / 确认框 / 红点 / 引导） ───────────────
 
         /// <inheritdoc/>

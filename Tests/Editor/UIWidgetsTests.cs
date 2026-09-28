@@ -183,6 +183,106 @@ namespace CloverEngine.Tests
             }
         }
 
+        // ───────────────────────── WorldHpBar：附属版面插槽（文字 / 徽章的挂点） ─────────────────────────
+        //
+        // 条体只有两个 Quad，文字与徽章要靠 GetAttachment() 给的挂点挂上去。本组断言：
+        //   ① 挂点是血条根的子节点 + 一块**世界空间 Canvas**（否则业务挂不了 uGUI 文本）；
+        //   ② 版面尺寸 = 条体外框（锚点 (0,0)/(1,1) 才落在条体角上）、1 单位 = 条体高的 1/100；
+        //   ③ 显隐与排序层由血条统一驱动（条体藏了文字还留在场上是静默失败）。
+
+        /// <summary>挂点必须是血条根下的一块世界空间 Canvas，且版面正好铺成条体外框。</summary>
+        [Test]
+        public void WorldHpBar_Attachment_IsWorldSpaceCanvasOnBarRect()
+        {
+            var prev = LogAssert.ignoreFailingMessages;
+            LogAssert.ignoreFailingMessages = true;
+            var host = new GameObject("HpBarAttachHost");
+            try
+            {
+                var bar = WorldHpBar.Create(host.transform, 1.4f, 0.2f, 2.15f, "Test.Attach", 2000);
+                var slot = bar.GetAttachment("Deco");
+                Assert.IsNotNull(slot, "附属版面必须建得出来");
+                Assert.AreSame(bar.transform, slot.parent, "版面必须是血条根的子节点（才跟着做广告牌朝向）");
+
+                var canvas = slot.GetComponent<Canvas>();
+                Assert.IsNotNull(canvas, "版面必须带 Canvas（业务要往上挂 uGUI Text / Image）");
+                Assert.AreEqual(RenderMode.WorldSpace, canvas.renderMode, "头顶血条在世界空间 ⇒ 版面也必须世界空间");
+                Assert.AreEqual(2001, canvas.sortingOrder, "版面必须压在条体（2000）之上");
+
+                Assert.AreEqual(WorldHpBar.AttachmentHeightUnits, slot.sizeDelta.y, 0.01f,
+                    "版面高 = 固定单位数（业务按它算 fontSize）");
+                Assert.AreEqual(1.44f, slot.sizeDelta.x * slot.localScale.x, 0.001f,
+                    "版面世界宽必须等于条体外框宽（1.4 + 0.04）");
+                Assert.AreEqual(0.235f, slot.sizeDelta.y * slot.localScale.y, 0.001f,
+                    "版面世界高必须等于条体外框高（0.2 + 0.035）");
+
+                Assert.AreSame(slot, bar.GetAttachment("Deco"), "同名的重复取用必须复用同一块版面");
+            }
+            finally
+            {
+                Object.DestroyImmediate(host);
+                LogAssert.ignoreFailingMessages = prev;
+            }
+        }
+
+        /// <summary>版面的显隐与排序层必须跟条体走（改条体却漏了版面 = 条没了徽章还在）。</summary>
+        [Test]
+        public void WorldHpBar_Attachment_FollowsVisibilityAndSortingOrder()
+        {
+            var prev = LogAssert.ignoreFailingMessages;
+            LogAssert.ignoreFailingMessages = true;
+            var host = new GameObject("HpBarAttachHost2");
+            try
+            {
+                var bar = WorldHpBar.Create(host.transform, 1f, 0.12f, 2.15f, "Test.Hp", 2000);
+                var slot = bar.GetAttachment();
+                var canvas = slot.GetComponent<Canvas>();
+
+                bar.SetVisible(false);
+                Assert.IsFalse(canvas.enabled, "条体隐藏时版面必须一起隐藏");
+                bar.SetVisible(true);
+                Assert.IsTrue(canvas.enabled, "条体显示时版面必须一起显示");
+
+                // 幂等复用改排序层（尺寸不变 ⇒ 走 ApplyParams 的排序层分支）⇒ 版面跟着升。
+                var again = WorldHpBar.Create(host.transform, 1f, 0.12f, 2.15f, "Test.Hp", 4321);
+                Assert.AreSame(bar, again, "已有血条必须复用，不再新建");
+                Assert.AreEqual(4322, slot.GetComponent<Canvas>().sortingOrder, "版面排序层必须 = 条体 + 1");
+            }
+            finally
+            {
+                Object.DestroyImmediate(host);
+                LogAssert.ignoreFailingMessages = prev;
+            }
+        }
+
+        /// <summary>条体尺寸变化（内部重建两个 Quad）后，业务已取过的版面必须还在。</summary>
+        [Test]
+        public void WorldHpBar_Attachment_SurvivesBarResize()
+        {
+            var prev = LogAssert.ignoreFailingMessages;
+            LogAssert.ignoreFailingMessages = true;
+            var host = new GameObject("HpBarAttachHost3");
+            try
+            {
+                var bar = WorldHpBar.Create(host.transform, 1f, 0.12f, 2.15f, "Test.Hp", 2000);
+                bar.GetAttachment("Deco");
+
+                WorldHpBar.Create(host.transform, 2f, 0.24f, 2.15f, "Test.Hp", 2000);
+
+                var slot = bar.GetAttachment("Deco");
+                Assert.IsNotNull(slot, "条体重建后版面必须按名字造回来（否则文字与徽章一起消失且不报错）");
+                Assert.AreSame(bar.transform, slot.parent);
+                Assert.AreEqual(WorldHpBar.AttachmentHeightUnits, slot.sizeDelta.y, 0.01f);
+                Assert.AreEqual(2.04f, slot.sizeDelta.x * slot.localScale.x, 0.001f,
+                    "重建后版面世界宽必须跟着新条体（2 + 0.04）");
+            }
+            finally
+            {
+                Object.DestroyImmediate(host);
+                LogAssert.ignoreFailingMessages = prev;
+            }
+        }
+
         private static void AssertQuadsSortingOrder(WorldHpBar bar, int expected)
         {
             var mrs = bar.GetComponentsInChildren<MeshRenderer>(true);

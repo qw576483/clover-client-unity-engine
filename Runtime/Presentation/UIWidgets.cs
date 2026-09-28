@@ -1259,10 +1259,29 @@ namespace CloverEngine
     /// 两个 Quad 用**同一个** order：它们的先后由广告牌朝向决定（Fill 的 local z = -0.01 ⇒ 更贴近相机
     /// ⇒ 后画 ⇒ 盖住 Bg）。
     ///
-    /// <h4>⑤ 用法</h4>
+    /// <h4>⑤ 附属版面（可选插槽）</h4>
+    /// 条体本身只有两个 Quad，**放不下文字与徽章**。需要往条上加东西（血量数字、等级牌、状态图标）
+    /// 时用 <see cref="GetAttachment"/> 取一块**附属版面**：一个世界空间 uGUI <see cref="Canvas"/>，
+    /// 作为血条根的子节点 —— 于是它自动继承广告牌朝向（<see cref="LateUpdate"/> 转的是血条根）、
+    /// 自动跟着条体改尺寸与显隐，业务侧**不用自己写一套跟随**。
+    /// <para>
+    /// <b>坐标系</b>：版面高恒为 <see cref="AttachmentHeightUnits"/> 个单位、宽按条体宽高比给；
+    /// 节点自身按条体实际世界尺寸缩放 ⇒ 版面里的 1 个单位 = 条体高（含边框）的 1/100，
+    /// <c>fontSize</c> / 子节点尺寸都按这个口径给，换条体尺寸时业务侧的数不用改。
+    /// </para>
+    /// <para>
+    /// <b>锚点落在条体边框上</b>：<c>(0,0)</c> = 条体外框左下、<c>(1,1)</c> = 右上
+    /// （版面中心与条体中心重合、尺寸 = 条体外框尺寸，所以子节点用锚点就能贴条体的任一条边，
+    /// ⛔ 不需要业务自己去算"条有多宽"）。
+    /// </para>
+    ///
+    /// <h4>⑥ 用法</h4>
     /// <code>
     /// var bar = WorldHpBar.Create(viewRoot.transform, tag: "Knight.Hp", sortingOrder: 2000);
     /// bar.SetHp(60, 60);
+    ///
+    /// var slot = bar.GetAttachment("HpDeco");          // 条体上的附属版面（幂等）
+    /// var num = UIFactory.CreateText("Number", slot, "60", 86, TextAnchor.MiddleCenter, Color.white);
     /// </code>
     ///
     /// 用法：
@@ -1289,6 +1308,16 @@ namespace CloverEngine
         /// </summary>
         public const int DefaultSortingOrder = 0;
 
+        /// <summary>
+        /// 附属版面的高度单位数（见 <see cref="GetAttachment"/>）：版面高恒为它，
+        /// 节点自身按条体实际世界尺寸缩放 ⇒ 1 单位 = 条体高的 1/100。
+        /// </summary>
+        public const float AttachmentHeightUnits = 100f;
+
+        /// <summary>条体**外框**相对内尺寸多出来的边（与 <see cref="Build"/> 里 Bg 的算式同一份来源）。</summary>
+        private const float OuterPadX = 0.04f;
+        private const float OuterPadY = 0.035f;
+
         private static readonly Color BgColor = new Color(0.06f, 0.06f, 0.06f, 0.85f);
 
         // 血量分档：绿 → 橙 → 红（一眼看出危险）
@@ -1308,6 +1337,19 @@ namespace CloverEngine
         private float _maxHp = 1f;
         private Camera _cam;
         private bool _visible = true;
+
+        /// <summary>条体外框尺寸（= <see cref="Build"/> 里 Bg Quad 的局部尺寸）；附属版面按它取坐标。</summary>
+        private float _outerW = DefaultWidth + OuterPadX;
+        private float _outerH = DefaultHeight + OuterPadY;
+
+        /// <summary>附属版面（<see cref="GetAttachment"/>）。<c>null</c> = 业务没要过插槽。</summary>
+        private RectTransform _attachment;
+
+        /// <summary>附属版面的 Canvas（显隐与排序层由血条统一驱动）。</summary>
+        private Canvas _attachmentCanvas;
+
+        /// <summary>已取过的插槽名；非空 ⇒ <see cref="Build"/> 重建条体后要把版面一起重建回来。</summary>
+        private string _attachmentName;
 
         /// <summary>当前血量比例 [0,1]。</summary>
         public float Ratio => _ratio;
@@ -1393,6 +1435,66 @@ namespace CloverEngine
             return Create(target, width, height, yOffset, tag, sortingOrder);
         }
 
+        /// <summary>
+        /// 取条体上的**附属版面**（可选插槽，见类注释「⑤ 附属版面」）：世界空间 uGUI <see cref="Canvas"/>，
+        /// 业务在它下面挂 <see cref="UnityEngine.UI.Text"/> / <see cref="UnityEngine.UI.Image"/>。
+        /// <para>
+        /// <b>幂等</b>：同一条血条只会有一块版面，重复调用返回同一个；换了 <paramref name="name"/>
+        /// 则把旧的整块换掉（与 <see cref="Create"/> 的幂等复用同一口径）。
+        /// </para>
+        /// <para>
+        /// <b>跟随</b>：版面是血条根的子节点 ⇒ 广告牌朝向、条体尺寸变化、<see cref="SetVisible"/>
+        /// 的显隐都由血条统一驱动，业务侧不需要第二套跟随逻辑。
+        /// </para>
+        /// <para>
+        /// <b>渲染顺序 = 条体 + 1</b>（压在两个 Quad 之上）。版面的 <c>sortingOrder</c> 会随
+        /// <see cref="Create"/> 传入值一起更新。
+        /// </para>
+        /// </summary>
+        /// <param name="name">版面节点名（也是重建后的名字）；空 = <c>"Attachment"</c>。</param>
+        public RectTransform GetAttachment(string name = "Attachment")
+        {
+            if (string.IsNullOrEmpty(name)) name = "Attachment";
+            if (_attachment != null && _attachmentName == name) return _attachment;
+            _attachmentName = name;
+            if (_attachment != null) Destroy(_attachment.gameObject);
+            return BuildAttachment(name);
+        }
+
+        /// <summary>造出附属版面节点（<see cref="GetAttachment"/> 与 <see cref="Build"/> 共用）。</summary>
+        private RectTransform BuildAttachment(string name)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(transform, false);
+            // Canvas 的 RequireComponent 是 RectTransform ⇒ 这一步会把节点换成 RectTransform，
+            // 所以位置/缩放必须在它之后写。
+            var canvas = go.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.sortingOrder = _sortingOrder + 1;
+
+            _attachmentCanvas = canvas;
+            _attachment = (RectTransform)go.transform;
+            _attachment.localPosition = Vector3.zero;
+            _attachment.localRotation = Quaternion.identity;
+            _attachment.anchorMin = _attachment.anchorMax = new Vector2(0.5f, 0.5f);
+            _attachment.pivot = new Vector2(0.5f, 0.5f);
+            _attachment.anchoredPosition = Vector2.zero;
+            ApplyAttachmentLayout();
+            return _attachment;
+        }
+
+        /// <summary>
+        /// 把版面铺成条体外框：尺寸 = 条体外框（世界单位），缩放 = 外框高 ÷
+        /// <see cref="AttachmentHeightUnits"/> ⇒ 版面锚点 (0,0)/(1,1) 正好落在条体外框的左下/右上角。
+        /// </summary>
+        private void ApplyAttachmentLayout()
+        {
+            if (_attachment == null) return;
+            var k = _outerH / AttachmentHeightUnits;      // 1 版面单位 = k 世界单位
+            _attachment.localScale = new Vector3(k, k, 1f);
+            _attachment.sizeDelta = new Vector2(_outerW / k, AttachmentHeightUnits);
+        }
+
         /// <summary>对已存在的血条应用新的尺寸 / 标签 / 排序层（供幂等复用的 <see cref="Create"/> 分支使用）。</summary>
         private void ApplyParams(float width, float height, string tag, int sortingOrder)
         {
@@ -1406,6 +1508,8 @@ namespace CloverEngine
                 _fill = null;
                 _bgRenderer = null;
                 _fillRenderer = null;
+                _attachment = null;
+                _attachmentCanvas = null;
                 _sortingOrder = sortingOrder;
                 Build(_width, _height);
                 Game.Logger?.Info("HpBar", $"血条尺寸已更新：{_width:F2}x{_height:F2}");
@@ -1416,6 +1520,8 @@ namespace CloverEngine
                 _sortingOrder = sortingOrder;
                 if (_bgRenderer != null) _bgRenderer.sortingOrder = _sortingOrder;
                 if (_fillRenderer != null) _fillRenderer.sortingOrder = _sortingOrder;
+                // 附属版面压在条体之上 ⇒ 排序层要跟着条体走，否则条体压在单位精灵之上、版面却在底下。
+                if (_attachmentCanvas != null) _attachmentCanvas.sortingOrder = _sortingOrder + 1;
                 Game.Logger?.Info("HpBar", $"血条排序层已更新：{_sortingOrder}");
             }
 
@@ -1429,12 +1535,17 @@ namespace CloverEngine
 
         private void Build(float width, float height)
         {
-            var bg = CreateQuad("Bg", transform, new Vector3(width + 0.04f, height + 0.035f, 1f), Vector3.zero, _sortingOrder);
+            _outerW = width + OuterPadX;
+            _outerH = height + OuterPadY;
+            var bg = CreateQuad("Bg", transform, new Vector3(_outerW, _outerH, 1f), Vector3.zero, _sortingOrder);
             _fill = CreateQuad("Fill", transform, new Vector3(width, height, 1f), new Vector3(0f, 0f, -0.01f), _sortingOrder);
             _bgRenderer = bg.GetComponent<MeshRenderer>();
             _fillRenderer = _fill.GetComponent<MeshRenderer>();
             AssignMaterial(_bgRenderer, BgColor);
             ApplyRatio();
+            // 重建会把条体的子节点全删掉（尺寸变化走这条路）⇒ 业务已取过的附属版面要按名字造回来，
+            // 否则"换了血条尺寸，版面与它下面的文字/徽章一起消失"且不报错。
+            if (!string.IsNullOrEmpty(_attachmentName)) BuildAttachment(_attachmentName);
         }
 
         /// <summary>按血量与上限更新（推荐入口：带上限才不会把 60 血的目标画成残血）。</summary>
@@ -1458,12 +1569,15 @@ namespace CloverEngine
             // 早退条件必须**同时**看缓存值与渲染器的实际状态：`Build()`（尺寸变化时重建 Quad）与
             // 池复用都会让 `_visible` 与 `renderer.enabled` 脱节 —— 只看缓存值时，
             // "取用同一个池对象后强制显示"会退化成**空操作**，血条永久不显示且不报错。
-            if (_visible == visible && _bgRenderer != null && _bgRenderer.enabled == visible) return;
+            var attachmentInSync = _attachmentCanvas == null || _attachmentCanvas.enabled == visible;
+            if (_visible == visible && _bgRenderer != null && _bgRenderer.enabled == visible && attachmentInSync) return;
             _visible = visible;
             // 只切两个 Quad 的渲染器（`GetComponentsInChildren` 每次调用都会新分配一个数组，
             // 频繁显隐会在热路径上持续产生 GC）。
             if (_bgRenderer != null) _bgRenderer.enabled = visible;
             if (_fillRenderer != null) _fillRenderer.enabled = visible;
+            // 附属版面必须跟条体一起显隐：只管条体的话，阵亡后条没了、等级牌与数字还挂在场上。
+            if (_attachmentCanvas != null) _attachmentCanvas.enabled = visible;
         }
 
         /// <summary>调整离宿主节点的高度（米）。</summary>

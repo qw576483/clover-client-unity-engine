@@ -25,7 +25,30 @@ namespace CloverEngine
     ///   <b>同路径并发加载合并</b>：多个调用者同时加载同一路径时只发起一次真实加载，
     ///   回调按注册顺序各收到一次。
     ///   </item>
+    ///   <item>
+    ///   <b>无类型加载（<c>typeof(UnityEngine.Object)</c>）与具体类型加载是两个结果</b>：
+    ///   Unity 对贴图路径按**主资源**解析 —— `<c>Sprite</c>` 导入的 `.png` 用
+    ///   <c>Resources.Load(path, typeof(UnityEngine.Object))</c> 拿到的是 `Texture2D`，
+    ///   用 `typeof(Sprite)` 才是 `Sprite`。因此「无类型」发起的加载**不能代表**某个具体类型的结果：
+    ///   缓存命中时按「无类型条目 ⇒ 未命中」处理并重载，在途中则按新类型重启这次加载
+    ///   （见 <see cref="StartLoad"/> 与 `LoadAsset{T}`）。
+    ///   </item>
     /// </list>
+    /// <para>
+    /// ⛔ <b>缺陷（已修）：<c>Preload</c> 之后同一批路径的 <c>LoadAsset&lt;Sprite&gt;</c> 永远拿不到 Sprite。</b>
+    /// 影响范围 = 所有先 <c>Preload</c> 再按具体类型取资源的地方（预热后整批资源不可用，表现为静默的白图/空图）。
+    /// </para>
+    /// <para><b>最小复现</b>：<c>Preload(new List&lt;string&gt;{"A"}, null); LoadAsset&lt;Sprite&gt;("A", s =&gt; …);</c>
+    /// —— 修复前 `s` 恒为 <c>null</c>（既可能在途 join 后拿到 `null`，也可能完成后再取时命中
+    /// 「与缓存类型不符」那个报错分支），修复后 `s` 是 Sprite。</para>
+    /// <para><b>修复后自证</b>：`Tests/Editor/ResourceManagerPreloadTests.cs`（在途 join 与完成后取两条路径，
+    /// 各带「先按 Sprite 加载、再 Preload 同一路径」的对照组 —— 类型不被降级）。</para>
+    /// <para><b>已知边界 / 精度限制</b>：无类型加载**仍然只返回主资源**（Unity 的既有语义，本类不改变它）；
+    /// 类型升级会让同一路径短时出现两次真实加载（被放弃那次的后端占用会补一次 <c>EndLoad</c> 释放，
+    /// 但磁盘 / 解包动作已经发生）⇒ 预热请用业务真正要的类型，而不是先无类型预热再按类型取。
+    /// </para>
+    /// <para><b>用法 + 首个消费方</b>：业务侧无需改动 —— 直接按要用的类型调 <c>LoadAsset&lt;T&gt;</c> 即可；
+    /// 「预热 + 之后按类型取」这一组合由此不再失效。</para>
     /// </remarks>
     internal sealed class ResourceManager : IResourceManager
     {
@@ -35,6 +58,13 @@ namespace CloverEngine
             public UnityEngine.Object Asset;
             public int RefCount;
             public int Bytes;
+
+            /// <summary>
+            /// 加载该条目时用的**期望类型**（<c>BeginLoad</c> 的第二个参数）。
+            /// 用途：区分「无类型加载」（<c>typeof(UnityEngine.Object)</c>，拿到的是 Unity 的**主资源**）
+            /// 与「具体类型加载」——两者可能是不同对象（见 <see cref="LoadAsset{T}"/> 的说明）。
+            /// </summary>
+            public Type LoadedType;
 
             /// <summary>
             /// 加载该条目时使用的后端。淘汰时按它配对 <c>EndLoad</c>：
@@ -57,6 +87,15 @@ namespace CloverEngine
 
             /// <summary>是否已向后端发起过加载（区分「操作句柄为 null」与「尚未发起」）。</summary>
             public bool IsStarted;
+
+            /// <summary>当前这次真实加载用的**期望类型**；由 <see cref="StartLoad"/> 写入。</summary>
+            public Type RequestedType;
+
+            /// <summary>
+            /// 真实加载的代次：每次 <see cref="StartLoad"/> 重启一次自增。
+            /// 被放弃的那次加载的完成回调晚到时据此丢弃（不再二次分发）。
+            /// </summary>
+            public int Generation;
 
             /// <summary>加载在途期间收到的 Release 次数：完成时从引用计数里扣掉，避免计数只增不减。</summary>
             public int Releases;
@@ -209,14 +248,26 @@ namespace CloverEngine
                     return;
                 }
 
-                // 同一路径被以不同类型加载：缓存里是另一个类型的实例。
-                // 不递增引用计数（调用方拿不到对象）、也不静默返回 null —— 明确报错指向调用方写错了类型，
-                // 否则「RefCount 涨了、资源却没到手」会一路累积成无法回收的引用。
-                Game.Logger?.Error("Resource",
-                    $"LoadAsset<{typeof(T).Name}> 与缓存类型不符：{path} 缓存中是 {cached.Asset.GetType().Name}" +
-                    "（同一路径只能用同一类型加载）");
-                callback?.Invoke(null);
-                return;
+                // 缓存里是**无类型加载**（typeof(UnityEngine.Object)，即 Preload 走的那条）留下的
+                // **主资源**：Unity 对贴图路径按主资源解析（Sprite 导入的 .png ⇒ Texture2D），
+                // 它与本类型要的对象不是同一个 ⇒ 清掉该条目并按 T 重新加载一次（见类注释的「无类型加载」一条）。
+                if (cached.LoadedType == typeof(UnityEngine.Object))
+                {
+                    Game.Logger?.Info("Resource",
+                        $"缓存条目来自无类型加载（{cached.Asset.GetType().Name}），按 {typeof(T).Name} 重新加载：{path}");
+                    Evict(path);
+                }
+                else
+                {
+                    // 同一路径被以不同类型加载：缓存里是另一个类型的实例。
+                    // 不递增引用计数（调用方拿不到对象）、也不静默返回 null —— 明确报错指向调用方写错了类型，
+                    // 否则「RefCount 涨了、资源却没到手」会一路累积成无法回收的引用。
+                    Game.Logger?.Error("Resource",
+                        $"LoadAsset<{typeof(T).Name}> 与缓存类型不符：{path} 缓存中是 {cached.Asset.GetType().Name}" +
+                        "（同一路径只能用同一类型加载）");
+                    callback?.Invoke(null);
+                    return;
+                }
             }
 
             // 缓存里存着「已被销毁」的对象（Unity 的假 null）：先清掉再重新加载，
@@ -228,19 +279,49 @@ namespace CloverEngine
             if (progress != null) pending.ProgressCallbacks.Add(progress);
             pending.Callbacks.Add(obj => callback?.Invoke(obj as T));
 
-            if (pending.Operation == null && !pending.IsStarted)
+            StartLoad(pending, typeof(T));
+        }
+
+        /// <summary>
+        /// 保证 <paramref name="pending"/> 上**至少有一次能满足 <paramref name="type"/> 的真实加载**。
+        /// <para>
+        /// 已在途且其期望类型能满足本次请求 ⇒ 本调用者只是**加入同一批等待者**（同路径合并语义）；
+        /// 在途但**满足不了**（典型：<c>Preload</c> 以 <c>typeof(UnityEngine.Object)</c> 发起的加载，
+        /// 之后业务要 <c>Sprite</c>）⇒ 用本次类型**重启一次真实加载**，被放弃那次的结果按
+        /// <see cref="PendingLoad.Generation"/> 丢弃，并按 <c>BeginLoad</c> 一一配对补一次 <c>EndLoad</c>。
+        /// </para>
+        /// </summary>
+        private void StartLoad(PendingLoad pending, Type type)
+        {
+            if (pending.IsStarted && pending.RequestedType != null && type.IsAssignableFrom(pending.RequestedType))
+                return;
+
+            if (pending.IsStarted)
             {
-                pending.IsStarted = true;
-                pending.Backend = _backend;
-                try
-                {
-                    pending.Operation = pending.Backend.BeginLoad(path, typeof(T), obj => CompletePending(pending, obj));
-                }
-                catch (Exception e)
-                {
-                    Game.Logger?.Error("Resource", $"加载失败：{path}: {e.Message}", e);
-                    CompletePending(pending, null);
-                }
+                var abandoned = pending.Backend;
+                Game.Logger?.Info("Resource",
+                    $"在途加载类型升级：{pending.Path} 由 {pending.RequestedType?.Name ?? "(none)"} 改为 {type.Name}");
+                // 被放弃的那次 BeginLoad 已占住后端一次加载（AssetBundle 后端是包引用）⇒ 配对释放一次
+                abandoned?.EndLoad(pending.Path);
+            }
+
+            pending.IsStarted = true;
+            pending.RequestedType = type;
+            pending.Backend = _backend;
+            var generation = ++pending.Generation;
+            try
+            {
+                pending.Operation = pending.Backend.BeginLoad(pending.Path, type,
+                    obj =>
+                    {
+                        // 被放弃的那次加载晚到的回调：代次不符 ⇒ 丢弃（否则会对同一批等待者二次分发）
+                        if (pending.Generation == generation) CompletePending(pending, obj);
+                    });
+            }
+            catch (Exception e)
+            {
+                Game.Logger?.Error("Resource", $"加载失败：{pending.Path}: {e.Message}", e);
+                if (pending.Generation == generation) CompletePending(pending, null);
             }
         }
 
@@ -342,7 +423,14 @@ namespace CloverEngine
                 // 其它仍持句柄的调用者随之失效。
                 var refCount = pending.Callbacks.Count - pending.Releases;
                 if (refCount < 0) refCount = 0;
-                _cache[pending.Path] = new Entry { Asset = asset, RefCount = refCount, Bytes = bytes, Backend = owner };
+                _cache[pending.Path] = new Entry
+                {
+                    Asset = asset,
+                    RefCount = refCount,
+                    Bytes = bytes,
+                    Backend = owner,
+                    LoadedType = pending.RequestedType,
+                };
                 _cachedBytes += bytes;
                 Touch(pending.Path);
                 EnforceWatermark();

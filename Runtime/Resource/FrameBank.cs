@@ -61,9 +61,12 @@ namespace CloverEngine
     /// <b>用法</b>：
     /// <code>
     /// var bank = new FrameBank();                       // 一般传 null 资源 → 走 Game.Res
-    /// var frames = bank.LoadDir("Art/Units/hero_out", FrameBank.PivotMode.UnifiedCanvasAnchor);
+    /// // 进图前 / 读条阶段：帧数组 + 派生表一次建好（战斗期两者都只是读缓存）
+    /// var pre    = bank.Preload("Art/Units/hero_out", FrameBank.PivotMode.UnifiedCanvasAnchor);
+    /// var frames = pre.Frames;                          // 整目录帧数组（按帧号升序）
+    /// var first  = pre.FrameMap[182];                   // 帧号 182 → 数组下标（-1 = 该目录没有这一帧）
+    /// // 之后单独取也是同一个缓存条目：
     /// var map    = bank.FrameNumberMap("Art/Units/hero_out", FrameBank.PivotMode.UnifiedCanvasAnchor);
-    /// var first  = map[182];                            // 帧号 182 → 数组下标（-1 = 该目录没有这一帧）
     /// // 出图 / 换场景时：
     /// bank.Clear();                                     // 只销毁本类现造的 Sprite
     /// </code>
@@ -228,6 +231,75 @@ namespace CloverEngine
 
             _cache[key] = frames;
             return frames;
+        }
+
+        // ── 预载（帧数组 + 派生表一次建好） ──────────────────────────────────
+
+        /// <summary>
+        /// 一次预载的**两样产物**：整目录帧数组 + 它的派生表「帧号 → 数组下标」。
+        /// <para>
+        /// 两样都由 <see cref="Preload(string, PivotMode)"/> 建好并进缓存，
+        /// 之后 <see cref="LoadDir(string, PivotMode)"/> / <see cref="FrameNumberMap(string, PivotMode)"/>
+        /// 都是**纯读**（不加载、不建表）。
+        /// </para>
+        /// </summary>
+        public readonly struct Preloaded
+        {
+            /// <summary>整目录帧数组（长度 0 = 该目录没有可用资源；⛔ 不为 <c>null</c>）。</summary>
+            public readonly Sprite[] Frames;
+
+            /// <summary>
+            /// 「帧号 → 帧数组下标」表（口径同 <see cref="FrameNumberMap(string, PivotMode)"/>）；
+            /// 空路径 ⇒ 空数组（⛔ 不为 <c>null</c>）。
+            /// </summary>
+            public readonly int[] FrameMap;
+
+            public Preloaded(Sprite[] frames, int[] frameMap)
+            {
+                Frames = frames;
+                FrameMap = frameMap;
+            }
+        }
+
+        /// <summary>
+        /// 预载某目录的**全部产物**（同步）：帧数组 + 「帧号 → 数组下标」映射表。
+        /// 锚点按导入设置原样。等价于 <see cref="Preload(string, PivotMode)"/> 传
+        /// <see cref="PivotMode.AsImported"/>。
+        /// </summary>
+        /// <returns>帧数组与映射表（该目录没有可用资源 ⇒ 帧数组长 0 + 空映射表；⛔ 都不为 <c>null</c>）。</returns>
+        public Preloaded Preload(string path)
+        {
+            return Preload(path, PivotMode.AsImported);
+        }
+
+        /// <summary>
+        /// 预载某目录的**全部产物**（同步）：帧数组 + 「帧号 → 数组下标」映射表，锚点按 <paramref name="mode"/>。
+        /// <para>
+        /// 与 <see cref="LoadDir(string, PivotMode)"/> 的差别只有一处：**把派生表一起建掉**
+        /// （帧数组本身是同一个缓存条目，⛔ 不会因此重复加载）。
+        /// </para>
+        /// <para>
+        /// **为什么派生表要跟着预载一起建**：<see cref="FrameNumberMap(string, PivotMode)"/> 是按**目录首次**
+        /// 现建的，建表要逐帧解析名字（<see cref="ParseFrameIndex(string)"/>），开销随帧数线性增长
+        /// （658 帧的目录上一次约 6.6 ms）。若等到"该目录第一个单位出场"那一帧才建，这段开销就落在
+        /// 装配路径上、表现为出场卡一下 ⇒ 调用方在进图前 / 读条阶段用本方法把两样一次建掉，
+        /// 战斗期 <see cref="FrameNumberMap(string, PivotMode)"/> 与 <see cref="LoadDir(string, PivotMode)"/>
+        /// 都只是读缓存。
+        /// </para>
+        /// <para>
+        /// ⚠️ **同步阻塞主线程**（帧数组经 <see cref="IResourceManager.LoadAll{T}(string)"/>）——
+        /// 与 <see cref="LoadDir(string, PivotMode)"/> 同一条硬需求，⛔ 不要在战斗热路径里第一次调用。
+        /// ⛔ 不是 <see cref="IResourceManager.Preload"/>（那个是按路径清单的**异步**预热，不产出整目录有序数组）。
+        /// </para>
+        /// </summary>
+        /// <param name="path">资源根下的相对目录。</param>
+        /// <param name="mode">锚点模式；逐帧动画目录用 <see cref="PivotMode.UnifiedCanvasAnchor"/>。</param>
+        /// <returns>帧数组与映射表（该目录没有可用资源 ⇒ 帧数组长 0 + 空映射表；⛔ 都不为 <c>null</c>）。</returns>
+        public Preloaded Preload(string path, PivotMode mode)
+        {
+            var frames = LoadDir(path, mode);
+            // 帧数组已在缓存里 ⇒ 这次调用只建派生表（同样的键、同样的缓存条目）。
+            return new Preloaded(frames, FrameNumberMap(path, mode));
         }
 
         /// <summary>
